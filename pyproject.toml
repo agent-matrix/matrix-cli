@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68","wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "matrix-cli"
+version = "0.1.0"
+description = "Official CLI for Matrix Hub"
+authors = [{name="agent-matrix",email="dev@agent-matrix.example"}]
+requires-python = ">=3.11,<3.13"
+dependencies = [
+  "matrix-python-sdk>=0.1,<1.0",
+  "typer>=0.9,<1.0",
+  "rich>=12.0,<14.0",
+  "python-dotenv>=1.1,<2.0",
+  "tomli>=2.0,<3.0"
+]
+
+[project.scripts]
+matrix = "matrix_cli.__main__:main"
