@@ -1,0 +1,19 @@
+site_name: Matrix CLI
+site_description: Official command-line interface for Matrix Hub
+site_author: agent-matrix
+theme:
+  name: material
+  palette:
+    primary: indigo
+    accent: indigo
+nav:
+  - Home: index.md
+  - Commands:
+      - Search: commands.md#search
+      - Show: commands.md#show
+      - Install: commands.md#install
+      - List: commands.md#list
+      - Remotes: commands.md#remotes
+  - Configuration: configuration.md
+  - Examples: examples.md
+  - API Reference: reference.md
