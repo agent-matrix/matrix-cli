@@ -1,57 +1,56 @@
 # matrix_cli/ui/theme.py
 
+import os
 import time
 import random
-from rich.text import Text
-from rich.panel import Panel
+from shutil import get_terminal_size
 from rich.console import Console
-import shutil
-import os
 
-# Path to the ASCII banner asset
-BANNER_PATH = os.path.join(os.path.dirname(__file__), "assets", "banner.txt")
+console = Console()
 
-
-def load_banner() -> Panel:
+def load_banner() -> str:
     """
-    Reads the ASCII art banner from disk and wraps it in a Rich Panel.
-    Falls back to a simple title if the file is missing or empty.
+    Load and return the ASCII banner from assets/banner.txt.
     """
+    banner_path = os.path.join(
+        os.path.dirname(__file__),
+        "assets",
+        "banner.txt"
+    )
     try:
-        with open(BANNER_PATH, encoding="utf-8") as f:
-            raw = f.read().strip()
-        if not raw:
-            raise ValueError("Empty banner file")
-    except Exception:
-        raw = "╔═╗┌─┐┌─┐┌─┐┌─┐┌┬┐   Matrix Shell"
-    text = Text(raw, style="bold green")
-    return Panel(text, border_style="green", padding=(1, 2))
+        with open(banner_path, encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        return "[bold red]Matrix Banner Not Found[/]"
 
-
-def matrix_rain(lines: int = None, width: int = None, duration: float = 1.0):
+def matrix_rain(duration: float = 2.0, fps: int = 30):
     """
-    Displays a Matrix-style rain animation in the terminal.
-
-    Args:
-      lines:  Number of rows (defaults to terminal height - 2)
-      width:  Number of columns (defaults to terminal width - 2)
-      duration: How long to run the animation, in seconds.
+    Show a Matrix-style rain animation for `duration` seconds.
+    `fps` controls the frame rate.
     """
-    console = Console()
-    size = console.size
-    rows = lines or max(1, size.height - 2)
-    cols = width or max(1, size.width - 2)
+    width, height = get_terminal_size()
+    columns = [0] * width
+    start = time.time()
+    interval = 1.0 / fps
 
-    chars = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@#$%&*()[]{}<>")
-    end_time = time.time() + duration
+    while time.time() - start < duration:
+        line = []
+        for i in range(width):
+            # Randomly start a drop if none exists
+            if columns[i] == 0 and random.random() < 0.005:
+                columns[i] = 1
+            if columns[i] > 0:
+                # “Head” of the drop
+                char = random.choice("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+                line.append(f"[bright_green]{char}[/]")
+                columns[i] += 1
+                # Drop resets when it exceeds the screen or randomly
+                if columns[i] > height or random.random() < 0.02:
+                    columns[i] = 0
+            else:
+                line.append(" ")
+        console.print("".join(line), end="\r")
+        time.sleep(interval)
 
-    while time.time() < end_time:
-        frame = "\n".join(
-            "".join(random.choice(chars) for _ in range(cols)) for _ in range(rows)
-        )
-        console.clear()
-        console.print(Text(frame, style="green"))
-        time.sleep(0.05)
-
-
-__all__ = ["load_banner", "matrix_rain"]
+    # Clear screen when done
+    console.clear()

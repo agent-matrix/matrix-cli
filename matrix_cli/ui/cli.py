@@ -11,13 +11,14 @@ from rich.console import Console
 from rich.table import Table
 from .theme import load_banner, matrix_rain
 import click_repl
+from click_repl.exceptions import ExitReplException  # <— catch the REPL’s own exit
+from click.exceptions import Abort                  # <— catch Click aborts
 
 # Monkey-patch click.Context.protected_args for click_repl compatibility
 Context.protected_args = Context.protected_args.setter(
     lambda self, v: setattr(self, "_protected_args", v)
 )
 
-# Console for all output
 console = Console()
 
 @click.group(
@@ -38,18 +39,15 @@ console = Console()
 )
 @click.pass_context
 def main(ctx: Context, rain: bool, no_repl: bool):
-    """Entry point for the Matrix Shell CLI."""
-    # Clear screen, then optionally play intro
     console.clear()
     if rain:
+        # will now last exactly 2 seconds
         matrix_rain(duration=2)
 
-    # Show banner and welcome
     console.clear()
     console.print(load_banner(), justify="center")
     console.print("[bold green]Welcome to the Matrix Shell![/]\n", justify="center")
 
-    # If no command given, prompt for help
     if ctx.invoked_subcommand is None:
         console.print(
             "[dim]Type[/dim] [bold]help[/bold] [dim]to list commands,[/] "
@@ -57,19 +55,18 @@ def main(ctx: Context, rain: bool, no_repl: bool):
             "or [bold]--help[/] [dim]for options.[/dim]\n"
         )
 
-    # Enter REPL unless disabled
     if not no_repl:
         try:
             click_repl.repl(ctx)
-        except (KeyboardInterrupt, EOFError):
+        except (KeyboardInterrupt, EOFError, ExitReplException, Abort):
             console.print("\n[bold red]Exiting Matrix Shell...[/]")
             sys.exit(0)
+
 
 @main.command("help", help="Show help for commands.")
 @click.argument("command", required=False)
 @click.pass_context
 def help_cmd(ctx: Context, command: str):
-    """Show help for commands; lists all if no command is given."""
     if command:
         cmd = main.get_command(ctx, command)
         if cmd:
@@ -84,15 +81,18 @@ def help_cmd(ctx: Context, command: str):
             table.add_row(name, cmd.short_help or "")
         console.print(table)
 
+
 @main.command("exit", help="Exit the Matrix Shell.")
 @click.pass_context
 def exit_cmd(ctx: Context):
-    """Exit the interactive shell."""
     console.print("[bold red]Exiting Matrix Shell...[/]")
     ctx.exit()
 
-# Alias 'close' to 'exit'
+
+# Aliases for convenience
 main.add_command(exit_cmd, name="close")
+main.add_command(exit_cmd, name="quit")
+
 
 def _register_commands():
     """
