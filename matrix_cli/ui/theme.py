@@ -34,34 +34,85 @@ def load_banner() -> str:
         # If banner is missing, show error in bold red
         return "[bold red]Matrix Banner Not Found[/]"
 
-def matrix_rain(duration: float = 2.0, fps: int = 30):
+# Helper class to manage the state of each column of falling characters
+class Column:
+    def __init__(self, width, height):
+        self.width = width
+        self.height = height
+        self.reset()
+
+    def reset(self):
+        """Resets the column to a new random state."""
+        self.head = random.randint(0, self.height)
+        self.length = random.randint(self.height // 3, self.height - 2)
+        self.speed = random.uniform(0.2, 1.5)
+        self.frames = 0
+        self.finished = False
+
+    def update(self):
+        """Moves the column down and checks if it's off-screen."""
+        self.frames += 1
+        # Move the head of the drop down based on its speed
+        if self.frames * self.speed > 1:
+            self.head += 1
+            self.frames = 0
+        
+        # If the tail has moved past the bottom of the screen, mark as finished
+        if self.head - self.length > self.height:
+            self.finished = True
+
+
+def matrix_rain(duration: float = 4.0, fps: int = 24):
     """
-    Show a Matrix-style rain animation for `duration` seconds.
-    `fps` controls the frame rate.
+    Show a full-screen Matrix-style rain animation.
     """
+    # Hide the cursor for a cleaner look
+    console.show_cursor(False)
+    
     width, height = get_terminal_size()
-    columns = [0] * width
+    # Create a list of Column objects, one for each column of the terminal
+    columns = [Column(width, height) for _ in range(width)]
+    
     start = time.time()
     interval = 1.0 / fps
 
-    while time.time() - start < duration:
-        line = []
-        for i in range(width):
-            # Randomly start a drop if none exists
-            if columns[i] == 0 and random.random() < 0.005:
-                columns[i] = 1
-            if columns[i] > 0:
-                # “Head” of the tear: choose a true Matrix glyph
-                char = random.choice(MATRIX_CHARS)
-                line.append(f"[bright_green]{char}[/]")
-                columns[i] += 1
-                # Reset drop if it overflows or randomly fades
-                if columns[i] > height or random.random() < 0.02:
-                    columns[i] = 0
-            else:
-                line.append(" ")
-        console.print("".join(line), end="\r")
-        time.sleep(interval)
+    try:
+        while time.time() - start < duration:
+            frame = []
+            for y in range(height):
+                line = []
+                for x in range(width):
+                    col = columns[x]
+                    char = " "
+                    style = "black"
 
-    # Clear screen when done
-    console.clear()
+                    # The head of the drop is white
+                    if y == col.head:
+                        style = "white"
+                        char = random.choice(MATRIX_CHARS)
+                    # The main body of the drop is bright green
+                    elif col.head > y > col.head - col.length:
+                        style = "bright_green"
+                        char = random.choice(MATRIX_CHARS)
+                    # The fading tail is a dimmer green
+                    elif col.head - col.length <= y <= col.head:
+                        style = "green"
+                        char = random.choice(MATRIX_CHARS)
+                    
+                    line.append(f"[{style}]{char}[/]")
+                frame.append("".join(line))
+
+            # Move cursor to the top-left and print the new frame
+            console.print("\n".join(frame), end="")
+            
+            # Update each column's position
+            for col in columns:
+                col.update()
+                if col.finished:
+                    col.reset()
+
+            time.sleep(interval)
+    finally:
+        # Always clear the screen and show the cursor when finished
+        console.clear()
+        console.show_cursor(True)
