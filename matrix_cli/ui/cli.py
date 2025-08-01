@@ -89,7 +89,7 @@ def main(ctx: Context, rain: bool, no_repl: bool):
     banner = load_banner()
     if banner:
         console.print(banner, justify="center")
-    console.print("[bold green]Welcome to the Matrix Shell![/]\n", justify="center")
+    console.print("[bold green]Matrix Shell v0.1.0[/]\n", justify="center")
 
     # Show usage hint when no subcommand given
     if ctx.invoked_subcommand is None:
