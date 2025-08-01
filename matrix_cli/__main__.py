@@ -9,13 +9,20 @@ import typer
 
 from .config import MatrixCLIConfig, load_config
 
+# Try to import the REPL exit exception so we can exit cleanly
+try:  # pragma: no cover - optional dependency handling
+    from click_repl.exceptions import ExitReplException  # type: ignore
+except Exception:  # pragma: no cover
+    ExitReplException = None  # type: ignore
+
 # Create the top-level Typer app
 app = typer.Typer(
     name="matrix",
     help="Matrix Hub CLI — search, show, install agents/tools, and manage remotes.",
     add_completion=True,
-    no_args_is_help=False,              # allow zero-arg invocation
+    no_args_is_help=False,  # allow zero-arg invocation
 )
+
 
 def _register_subapp(module_name: str, name: str) -> None:
     """
@@ -35,6 +42,7 @@ def _register_subapp(module_name: str, name: str) -> None:
 
     app.add_typer(sub, name=name)
 
+
 # Register command groups
 _register_subapp("matrix_cli.commands.search", "search")
 _register_subapp("matrix_cli.commands.show", "show")
@@ -42,11 +50,13 @@ _register_subapp("matrix_cli.commands.install", "install")
 _register_subapp("matrix_cli.commands.list", "list")
 _register_subapp("matrix_cli.commands.remotes", "remotes")
 
+
 def _version_string() -> str:
     try:
         return metadata.version("matrix-cli")
     except metadata.PackageNotFoundError:  # pragma: no cover
         return "0.0.0"
+
 
 @app.callback(invoke_without_command=True)
 def _global_options(
@@ -100,16 +110,28 @@ def _global_options(
             f"gateway={cfg.gateway_url} cache_dir={cfg.cache_dir}"
         )
 
-    # If no subcommand was given, launch the interactive UI
+    # If no Typer subcommand was given, invoke the Click-based UI.
     if ctx.invoked_subcommand is None:
         from matrix_cli.ui.cli import main as ui_main
 
-        # Run the Click-based REPL UI
-        ui_main(standalone_mode=False, args=[])
-        sys.exit(0)
+        # Forward any leftover CLI args (e.g., "exit") to the Click UI.
+        ui_args = list(ctx.args or [])
+        try:
+            ui_main(standalone_mode=False, args=ui_args)
+        except SystemExit:
+            # Normal Click termination
+            raise
+        except Exception as exc:
+            # If the UI raised click-repl's ExitReplException, exit cleanly
+            if ExitReplException and isinstance(exc, ExitReplException):
+                raise SystemExit(0)
+            # Otherwise, re-raise the original error
+            raise
+
 
 def main() -> None:
     app()
+
 
 if __name__ == "__main__":
     # When run as a module: python -m matrix_cli
