@@ -86,3 +86,4 @@ ehthumbs.db
 # Ignore any local instance or data folders.
 /instance/
 /data/
+/temp
