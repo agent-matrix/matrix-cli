@@ -8,13 +8,12 @@ import pkgutil
 import importlib
 
 from rich.console import Console
-from rich.table import Table
 from .theme import load_banner, matrix_rain
 import click_repl
-from click_repl.exceptions import ExitReplException  # <— catch the REPL’s own exit
-from click.exceptions import Abort                  # <— catch Click aborts
+from click_repl.exceptions import ExitReplException
+from click.exceptions import Abort
 
-# Monkey-patch click.Context.protected_args for click_repl compatibility
+# Monkey‐patch click.Context.protected_args for click_repl compatibility
 Context.protected_args = Context.protected_args.setter(
     lambda self, v: setattr(self, "_protected_args", v)
 )
@@ -27,21 +26,12 @@ console = Console()
     help="Film-inspired Matrix Shell for matrix-cli."
 )
 @click.version_option(version="1.0.0", prog_name="matrix")
-@click.option(
-    "--rain/--no-rain",
-    default=True,
-    help="Show Matrix rain animation on startup."
-)
-@click.option(
-    "--no-repl",
-    is_flag=True,
-    help="Skip the interactive REPL shell after startup."
-)
+@click.option("--rain/--no-rain", default=True, help="Show Matrix rain animation on startup.")
+@click.option("--no-repl", is_flag=True, help="Skip the interactive REPL shell after startup.")
 @click.pass_context
 def main(ctx: Context, rain: bool, no_repl: bool):
     console.clear()
     if rain:
-        # will now last exactly 2 seconds
         matrix_rain(duration=2)
 
     console.clear()
@@ -52,7 +42,7 @@ def main(ctx: Context, rain: bool, no_repl: bool):
         console.print(
             "[dim]Type[/dim] [bold]help[/bold] [dim]to list commands,[/] "
             "[bold]help <command>[/] [dim]for details,[/] "
-            "or [bold]--help[/] [dim]for options.[/dim]\n"
+            "[bold]--help[/] [dim]for options.[/dim]\n"
         )
 
     if not no_repl:
@@ -67,6 +57,10 @@ def main(ctx: Context, rain: bool, no_repl: bool):
 @click.argument("command", required=False)
 @click.pass_context
 def help_cmd(ctx: Context, command: str):
+    """
+    With no arguments, prints full top‐level help (usage, options, all commands).
+    With a subcommand name, prints that command’s help.
+    """
     if command:
         cmd = main.get_command(ctx, command)
         if cmd:
@@ -74,12 +68,13 @@ def help_cmd(ctx: Context, command: str):
         else:
             console.print(f"[red]Error:[/] No such command '{command}'")
     else:
-        table = Table(show_header=True, header_style="bold cyan")
-        table.add_column("Command", style="cyan", no_wrap=True)
-        table.add_column("Description", style="white")
-        for name, cmd in main.commands.items():
-            table.add_row(name, cmd.short_help or "")
-        console.print(table)
+        # Full top‐level help
+        click.echo(main.get_help(ctx))
+
+
+# Alias both `help` and `matrix` to the same handler,
+# so typing `matrix` inside the REPL just reprints help.
+main.add_command(help_cmd, name="matrix")
 
 
 @main.command("exit", help="Exit the Matrix Shell.")
@@ -87,23 +82,24 @@ def help_cmd(ctx: Context, command: str):
 def exit_cmd(ctx: Context):
     console.print("[bold red]Exiting Matrix Shell...[/]")
     ctx.exit()
-
-
 # Aliases for convenience
 main.add_command(exit_cmd, name="close")
 main.add_command(exit_cmd, name="quit")
 
 
+@main.command("clear", help="Clear the Matrix Shell screen.")
+def clear_cmd():
+    console.clear()
+
+
 def _register_commands():
     """
-    Auto-discover any click.Command objects in matrix_cli.commands modules
+    Auto-discover click.Command objects in matrix_cli.commands
     and register them under our main group.
     """
     pkg_root = __package__.rsplit(".", 1)[0]
     commands_pkg = f"{pkg_root}.commands"
-    commands_path = os.path.join(
-        os.path.dirname(__file__), "..", "commands"
-    )
+    commands_path = os.path.join(os.path.dirname(__file__), "..", "commands")
 
     for _, module_name, _ in pkgutil.iter_modules([commands_path]):
         try:
@@ -114,7 +110,7 @@ def _register_commands():
             obj = getattr(module, attr)
             if isinstance(obj, click.core.Command):
                 main.add_command(obj)
-                break  # register only the first Command per module
+                break  # only the first Command per module
 
 _register_commands()
 

@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-from typing import Literal, Optional
+from enum import Enum
+from typing import Optional
 
 import httpx
 import typer
@@ -14,6 +15,11 @@ from matrix_sdk.cache import Cache
 from ..config import MatrixCLIConfig
 
 app = typer.Typer(help="List entities from Matrix Hub or MCP-Gateway.")
+
+
+class Source(str, Enum):
+    hub = "hub"
+    gateway = "gateway"
 
 
 def _make_client(cfg: MatrixCLIConfig) -> MatrixClient:
@@ -59,9 +65,18 @@ def _list_from_gateway(cfg: MatrixCLIConfig, kind: Optional[str]) -> list[dict]:
 @app.command("run")
 def list_cmd(
     ctx: typer.Context,
-    type: Optional[str] = typer.Option(None, "--type", "-t", help="agent|tool|mcp_server"),
-    source: Literal["hub", "gateway"] = typer.Option("hub", "--source", "-s"),
-    limit: int = typer.Option(100, "--limit", "-n", min=1, max=500),
+    type: Optional[str] = typer.Option(
+        None, "--type", "-t", help="Filter by type: agent|tool|mcp_server"
+    ),
+    source: Source = typer.Option(
+        Source.hub,
+        "--source",
+        "-s",
+        help="Which catalog to list from (hub or gateway)",
+    ),
+    limit: int = typer.Option(
+        100, "--limit", "-n", min=1, max=500, help="Maximum number of items"
+    ),
 ) -> None:
     """
     matrix list --type tool --source gateway
@@ -69,7 +84,7 @@ def list_cmd(
     console = Console()
     cfg: MatrixCLIConfig = ctx.obj
 
-    if source == "hub":
+    if source is Source.hub:
         client = _make_client(cfg)
         try:
             # Use '*' as a broad query; backend may interpret it as "match all"
@@ -101,8 +116,7 @@ def list_cmd(
             console.print(f"[red]Error:[/] {e}")
             raise typer.Exit(1)
 
-    else:
-        # gateway
+    else:  # source == Source.gateway
         rows = _list_from_gateway(cfg, kind=type)
         if not rows:
             console.print("[yellow]No entities returned from gateway.[/]")
@@ -116,7 +130,9 @@ def list_cmd(
         table.add_column("URL", overflow="fold")
 
         for i, r in enumerate(rows, start=1):
-            kind = r.get("kind") or ("tool" if "input_schema" in r or "integration_type" in r else "mcp_server")
+            kind = r.get("kind") or (
+                "tool" if "input_schema" in r or "integration_type" in r else "mcp_server"
+            )
             name = r.get("name") or r.get("id") or r.get("uid") or ""
             uid = r.get("uid") or r.get("id") or ""
             url = r.get("url") or r.get("endpoint") or r.get("base_url") or ""

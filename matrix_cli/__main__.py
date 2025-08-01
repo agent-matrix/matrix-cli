@@ -14,9 +14,8 @@ app = typer.Typer(
     name="matrix",
     help="Matrix Hub CLI — search, show, install agents/tools, and manage remotes.",
     add_completion=True,
-    no_args_is_help=True,
+    no_args_is_help=False,              # allow zero-arg invocation
 )
-
 
 def _register_subapp(module_name: str, name: str) -> None:
     """
@@ -26,7 +25,6 @@ def _register_subapp(module_name: str, name: str) -> None:
     try:
         mod = importlib.import_module(module_name)
     except Exception as exc:  # pragma: no cover - defensive
-        # Fail soft if a commands module is missing; the rest of the CLI still works.
         typer.echo(f"[warn] Unable to load commands from {module_name}: {exc}", err=True)
         return
 
@@ -37,7 +35,6 @@ def _register_subapp(module_name: str, name: str) -> None:
 
     app.add_typer(sub, name=name)
 
-
 # Register command groups
 _register_subapp("matrix_cli.commands.search", "search")
 _register_subapp("matrix_cli.commands.show", "show")
@@ -45,15 +42,13 @@ _register_subapp("matrix_cli.commands.install", "install")
 _register_subapp("matrix_cli.commands.list", "list")
 _register_subapp("matrix_cli.commands.remotes", "remotes")
 
-
 def _version_string() -> str:
     try:
         return metadata.version("matrix-cli")
     except metadata.PackageNotFoundError:  # pragma: no cover
         return "0.0.0"
 
-
-@app.callback()
+@app.callback(invoke_without_command=True)
 def _global_options(
     ctx: typer.Context,
     base_url: Optional[str] = typer.Option(
@@ -78,39 +73,43 @@ def _global_options(
         None,
         "--version",
         help="Show matrix-cli version and exit.",
-        callback=None,
         is_eager=True,
     ),
 ) -> None:
     """
     Loads configuration once per process and exposes it to subcommands via ctx.obj.
     Allows per-invocation overrides for base URL and token.
+    If no subcommand is given, hand off to the interactive Matrix Shell UI.
     """
     if version:
-        typer.echo(f"matrix-cli { _version_string() }")
+        typer.echo(f"matrix-cli {_version_string()}")
         raise typer.Exit(code=0)
 
+    # Load and override config
     cfg: MatrixCLIConfig = load_config()
-
-    # One-off overrides
     if base_url:
         cfg.registry_url = base_url
     if token:
         cfg.registry_token = token
 
-    # Expose config to subcommands
     ctx.obj = cfg
 
-    # Optional verbose output
     if verbose:
         typer.echo(
-            f"[matrix-cli] registry={cfg.registry_url} gateway={cfg.gateway_url} cache_dir={cfg.cache_dir}"
+            f"[matrix-cli] registry={cfg.registry_url} "
+            f"gateway={cfg.gateway_url} cache_dir={cfg.cache_dir}"
         )
 
+    # If no subcommand was given, launch the interactive UI
+    if ctx.invoked_subcommand is None:
+        from matrix_cli.ui.cli import main as ui_main
+
+        # Run the Click-based REPL UI
+        ui_main(standalone_mode=False, args=[])
+        sys.exit(0)
 
 def main() -> None:
     app()
-
 
 if __name__ == "__main__":
     # When run as a module: python -m matrix_cli

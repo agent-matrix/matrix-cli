@@ -128,7 +128,7 @@ docs-clean:
 # -----------------------------------------------------------------------------
 ui:
 	@echo "Launching Matrix UI shell..."
-	$(VENV_DIR)/bin/matrix-ui
+	$(VENV_DIR)/bin/matrix
 
 uninstall:
 	@echo "Uninstalling matrix-cli and optional UI extras..."

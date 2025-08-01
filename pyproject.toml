@@ -7,7 +7,7 @@ name = "matrix-cli"
 version = "0.1.0"
 description = "Official CLI for Matrix Hub"
 authors = [
-  { name = "agent-matrix", email = "dev@agent-matrix.example" }
+  { name = "agent-matrix", email = "contact@ruslanmv.com" }
 ]
 requires-python = ">=3.11,<3.13"
 dependencies = [
@@ -20,11 +20,10 @@ dependencies = [
 
 [project.optional-dependencies]
 ui = [
-  "rich>=12.0.0",       # styled text, panels
-  "click-repl>=0.2.0",  # interactive REPL shell
-  # "textual>=0.20.0"   # optional for advanced TUI
+  "rich>=12.0.0",
+  "click-repl>=0.2.0",
+  # "textual>=0.20.0"
 ]
 
 [project.scripts]
-matrix    = "matrix_cli.__main__:main"
-matrix-ui = "matrix_cli.ui.cli:main"
+matrix = "matrix_cli.__main__:main"
