@@ -1,3 +1,5 @@
+![](assets/2025-08-01-18-44-48.png)
+
 # Matrix CLI
 
 **Official command-line interface for Matrix Hub**  
@@ -26,7 +28,7 @@ pipx install matrix-cli
 
 # Or via pip
 pip install matrix-cli
-````
+```
 
 > **Requires** Python 3.11+.
 

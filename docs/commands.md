@@ -1,58 +1,118 @@
-# Commands Reference
+<!-- docs/commands.md -->
+# Commands
 
-## `matrix search`
+This page shows common commands and options. All commands are available **one-shot** or inside the **REPL**.
 
-Search the Matrix Hub catalog.
+> Inside the REPL, `matrix` as a leading token is optional — `matrix exit` and `exit` both work.
+
+---
+
+## Global options (group)
+
+- `--version` – print CLI version and exit  
+- `--rain / --no-rain` – toggle startup animation  
+- `--no-repl` – run requested action (e.g., `--help`) and exit  
+- `--help` – show top-level help
+
+In REPL, options-first is supported (e.g., `--no-rain`).
+
+---
+
+## search
+
+Search the Hub catalog.
 
 ```bash
-matrix search "your query" \
-  [--type agent|tool|mcp_server] \
-  [--capabilities cap1,cap2] \
-  [--frameworks fw1,fw2] \
-  [--providers p1,p2] \
-  [--mode hybrid|keyword|semantic] \
-  [--limit N] [--offset M] [--json]
+matrix search "summarize pdfs" \
+  --type agent \
+  --capabilities pdf,summarize \
+  --frameworks langgraph \
+  --mode hybrid \
+  --limit 10
 ```
-* `q` (positional): free‑text search query
-* `--type`: filter by entity type
-* `--mode`: ranking mode (hybrid is default)
-* `--json`: raw JSON output
 
-## `matrix show`
-Show details of a single entity by its UID:
+**Common flags**
+
+| Flag             | Description                     |
+| ---------------- | ------------------------------- |
+| `--type`         | Filter by entity type           |
+| `--capabilities` | Comma-separated capability list |
+| `--frameworks`   | Filter by frameworks            |
+| `--mode`         | Search mode (e.g., hybrid)      |
+| `--limit`        | Max results                     |
+| `--json`         | Raw JSON output                 |
+
+---
+
+## show
+
+Display full metadata for an entity.
 
 ```bash
 matrix show agent:pdf-summarizer@1.4.2 [--json]
 ```
-Renders name, version, type, summary, capabilities, endpoints, artifacts, adapters.
 
-## `matrix install`
-Install an entity into a project:
+Supports both `type:name@version` and `type:name` (with `--version` flag where applicable).
 
-```bash
-matrix install <id> --target <path> [--version <ver>] [--json]
-```<id>` can be `type:name@version` or `type:name` with `--version`.
-Writes adapters, registers with MCP-Gateway, and produces `matrix.lock.json`.
+---
 
-## `matrix list`
-List entities from Hub or Gateway:
+## install
+
+Install an agent/tool into your project.
 
 ```bash
-matrix list [--type <type>] [--source hub|gateway] [--limit N]
+matrix install agent:pdf-summarizer@1.4.2 \
+  --target ./apps/pdf-bot
 ```
-* `--source=hub` queries the catalog index.
-* `--source=gateway` queries your MCP‑Gateway registrations.
 
-## `matrix remotes`
-Manage catalog remotes:
+Writes adapters, registers with MCP-Gateway (if configured), and creates `matrix.lock.json`.
+
+---
+
+## list
+
+List entities from Hub or Gateway.
 
 ```bash
-# List all
-matrix remotes list [--json]
+# From Hub index
+matrix list --type tool --source hub
 
-# Add a new remote
-matrix remotes add <url> [--name <name>] [--json]
-
-# Trigger ingest of a remote
-matrix remotes ingest <name> [--json]
+# From MCP-Gateway
+matrix list --type tool --source gateway
 ```
+
+---
+
+## remotes
+
+Manage catalog remotes.
+
+```bash
+# List
+matrix remotes list
+
+# Add
+matrix remotes add https://raw.githubusercontent.com/agent-matrix/catalog/main/index.json \
+  --name official
+
+# Remove
+matrix remotes remove --url https://raw.githubusercontent.com/agent-matrix/catalog/main/index.json
+
+# Trigger ingest
+matrix remotes ingest official
+```
+
+---
+
+
+---
+
+## REPL helpers
+
+```bash
+help                  # or: matrix help
+help <command>
+clear                 # or: matrix clear
+exit | quit | close   # or: matrix exit
+```
+
