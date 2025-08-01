@@ -37,13 +37,13 @@ ttl_seconds = 14400
 You can also override per‑command:
 
 ```bash
-matrix --base-url [http://hub.example.com](http://hub.example.com) search "summarize pdfs"
+matrix --base-url http://hub.example.com search "summarize pdfs"
 ```
 Or via environment:
 
 ```bash
-export MATRIX_BASE_URL="[http://hub.example.com](http://hub.example.com)"
-export MATRIX_TOKEN="..."
+export MATRIX_BASE_URL=http://hub.example.com
+export MATRIX_TOKEN=...
 ```
 
 ### 3. CLI Examples
@@ -89,7 +89,7 @@ matrix list --type tool --source gateway
 matrix remotes list
 
 # Add
-matrix remotes add [https://raw.githubusercontent.com/agent-matrix/catalog/main/index.json](https://raw.githubusercontent.com/agent-matrix/catalog/main/index.json) \
+matrix remotes add https://raw.githubusercontent.com/agent-matrix/catalog/main/index.json \
     --name official
 
 # Trigger Ingest

@@ -8,9 +8,17 @@ from rich.console import Console
 
 console = Console()
 
+# Katakana and symbols inspired by The Matrix film
+MATRIX_CHARS = (
+    "ﾊﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜｦﾝ"  # Common katakana
+    "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉ"  # Additional katakana
+    "0123456789"            # Numerals for variety
+)
+
 def load_banner() -> str:
     """
-    Load and return the ASCII banner from assets/banner.txt.
+    Load and return the ASCII banner from assets/banner.txt,
+    wrapped in bright green for that classic Matrix look.
     """
     banner_path = os.path.join(
         os.path.dirname(__file__),
@@ -19,8 +27,11 @@ def load_banner() -> str:
     )
     try:
         with open(banner_path, encoding="utf-8") as f:
-            return f.read()
+            content = f.read()
+            # Wrap in bright green tags to color the entire banner
+            return f"[bright_green]{content}[/bright_green]"
     except FileNotFoundError:
+        # If banner is missing, show error in bold red
         return "[bold red]Matrix Banner Not Found[/]"
 
 def matrix_rain(duration: float = 2.0, fps: int = 30):
@@ -40,11 +51,11 @@ def matrix_rain(duration: float = 2.0, fps: int = 30):
             if columns[i] == 0 and random.random() < 0.005:
                 columns[i] = 1
             if columns[i] > 0:
-                # “Head” of the drop
-                char = random.choice("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+                # “Head” of the tear: choose a true Matrix glyph
+                char = random.choice(MATRIX_CHARS)
                 line.append(f"[bright_green]{char}[/]")
                 columns[i] += 1
-                # Drop resets when it exceeds the screen or randomly
+                # Reset drop if it overflows or randomly fades
                 if columns[i] > height or random.random() < 0.02:
                     columns[i] = 0
             else:
