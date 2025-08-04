@@ -48,7 +48,7 @@ dependencies = [
 [project.optional-dependencies]
 # Extras for the interactive UI (REPL)
 ui = [
-  "click-repl>=0.2.0,<0.3.0",
+  "click-repl>=0.3.0",
   # Pin prompt_toolkit for stable REPL repaint rate
   "prompt_toolkit==3.0.43",
   # Rich is already pinned above, reused here
