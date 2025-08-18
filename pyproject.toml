@@ -1,167 +1,73 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "matrix-cli"
-version = "0.1.0"
-description = "Official CLI for Matrix Hub"
+version = "0.1.1"
+description = "Matrix CLI — thin UX layer over matrix-python-sdk (deep links, local builder, runtime)"
 readme = { file = "README.md", content-type = "text/markdown" }
-requires-python = ">=3.11,<3.13"
-license = { text = "Apache-2.0" }
-authors = [
-  { name = "agent-matrix", email = "contact@ruslanmv.com" }
-]
+
+
+license = "Apache-2.0"
+# Optionally ship the license file(s) explicitly (supported in setuptools>=77)
+license-files = ["LICENSE"]
+
+requires-python = ">=3.11"
+authors = [{ name = "Ruslan Magana Vsevolodovna" }]
 keywords = [
   "matrix",
-  "ai",
+  "mcp",
+  "model context protocol",
+  "cli",
   "agents",
   "tools",
-  "cli",
-  "mcp",
-  "hub",
+  "runtime",
+  "search",
+  "installer",
 ]
 classifiers = [
-  "Development Status :: 3 - Alpha",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
   "Environment :: Console",
   "Intended Audience :: Developers",
-  "License :: OSI Approved :: Apache Software License",
   "Operating System :: OS Independent",
-  "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.11",
-  "Programming Language :: Python :: 3.12",
-  "Topic :: Software Development :: Libraries",
   "Topic :: Utilities",
+  "Topic :: Software Development :: Libraries :: Application Frameworks",
+  "Typing :: Typed",
 ]
-
-# Runtime deps for the CLI
 dependencies = [
-  "matrix-python-sdk>=0.1,<1.0",
-  "typer>=0.9,<1.0",
-  "rich>=12.0,<14.0",
-  "python-dotenv>=1.1,<2.0",
-  "tomli>=2.0,<3.0",  # fallback for Python <3.11 (we still allow it for portability)
-  # click comes via typer; pin optional if needed:
-  # "click>=8.1,<9.0",
+  "typer>=0.12",
+  "rich>=13.7",
+  "matrix-python-sdk>=0.1.2",
+  # You can drop tomli because requires-python >=3.11, but harmless if left:
+  # "tomli; python_version<'3.11'",
 ]
 
-[project.optional-dependencies]
-# Extras for the interactive UI (REPL)
-ui = [
-  "click-repl>=0.3.0",
-  # Pin prompt_toolkit for stable REPL repaint rate
-  "prompt_toolkit==3.0.43",
-  # Rich is already pinned above, reused here
-]
-
-
-
-# Developer tooling used by the Makefile targets
-dev = [
-  "ruff>=0.5.0",
-  "black>=24.3.0",
-  "flake8>=7.0.0",
-  "mypy>=1.8.0",
-  "pytest>=8.2.0",
-  "pytest-cov>=5.0.0",
-  "build>=1.2.1",
-  "twine>=5.0.0",
-  "mkdocs>=1.5.0",
-  "mkdocs-material>=9.5.0",
-  "types-requests>=2.32.0.20240622",  # if SDK uses requests/httpx, helps mypy
-]
+[project.urls]
+Homepage = "https://matrixhub.io"
+API = "https://api.matrixhub.io"
 
 [project.scripts]
 matrix = "matrix_cli.__main__:main"
 
-[project.urls]
-Homepage = "https://github.com/agent-matrix/matrix-cli"
-Repository = "https://github.com/agent-matrix/matrix-cli"
-Issues = "https://github.com/agent-matrix/matrix-cli/issues"
-Documentation = "https://agent-matrix.github.io/matrix-cli/"
+[project.optional-dependencies]
+test = [
+  "pytest>=8.0",
+  "pytest-cov>=5.0",
+  "pytest-mock",
+]
 
-# ----------------------------
-# setuptools packaging config
-# ----------------------------
-[tool.setuptools]
-include-package-data = true
-
+# ✅ Constrain package discovery to avoid picking up 'backup'
 [tool.setuptools.packages.find]
-where = ["."]
 include = ["matrix_cli*"]
+exclude = ["backup*", "tests*", "docs*"]
 
-# Ensure the banner asset is included in the wheel
-[tool.setuptools.package-data]
-"matrix_cli.ui" = ["assets/banner.txt"]
-
-# ----------------------------
-# Tooling configuration
-# ----------------------------
-
-[tool.ruff]
-line-length = 100
-target-version = "py311"
-exclude = [
-  ".git",
-  ".venv",
-  "venv",
-  "build",
-  "dist",
-  ".mypy_cache",
-  ".ruff_cache",
-  ".pytest_cache",
-]
-
-[tool.ruff.lint]
-select = [
-  "E",  # pycodestyle errors
-  "F",  # pyflakes
-  "I",  # isort
-  "UP", # pyupgrade
-  "B",  # bugbear
-]
-ignore = [
-  "E203",  # whitespace before ':', conflicts with black
-  "E501",  # line length (handled by black)
-]
-
-[tool.black]
-line-length = 100
-target-version = ["py311"]
-include = '\.pyi?$'
-exclude = '''
-/(
-    \.git
-  | \.venv
-  | venv
-  | build
-  | dist
-  | \.mypy_cache
-  | \.ruff_cache
-  | \.pytest_cache
-)/
-'''
-
-[tool.mypy]
-python_version = "3.11"
-ignore_missing_imports = true
-warn_unused_ignores = true
-warn_redundant_casts = true
-warn_unused_configs = true
-strict_optional = true
-pretty = true
-exclude = [
-  "build/.*",
-  "dist/.*",
-  "venv/.*",
-  "\\.venv/.*",
-  "tests/.*",
-]
+# If you ship typing marker, uncomment:
+# [tool.setuptools.package-data]
+# matrix_cli = ["py.typed"]
 
 [tool.pytest.ini_options]
-minversion = "8.0"
 addopts = "-q"
-testpaths = ["tests"]
-
-# Optional: configure mkdocs build via CLI (config lives in mkdocs.yml)
-# [tool.mkdocs]  # (not used—mkdocs reads mkdocs.yml)
+pythonpath = ["."]

@@ -87,3 +87,7 @@ ehthumbs.db
 /instance/
 /data/
 /temp
+/backup
+
+* copy.*
+* copy *.*

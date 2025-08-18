@@ -1,166 +1,132 @@
-# Makefile for matrix-cli
-# -----------------------------------------------------------------------------
-# Variables (portable defaults)
-# -----------------------------------------------------------------------------
-# Try python3.11, then python3, then python
-PY_BOOT      := $(shell command -v python3.11 >/dev/null 2>&1 && echo python3.11 || (command -v python3 >/dev/null 2>&1 && echo python3 || echo python))
-VENV_DIR     := venv
-BUILD_DIR    := dist
-SRC_DIR      := matrix_cli
-TEST_DIR     := tests
-DOCS_DIR     := docs
-CACHE_DIR    := ~/.cache/matrix
+# ====================================================================================
+# Makefile for the Matrix CLI Project
+#
+# This Makefile automates common development tasks such as installation, linting,
+# testing, building, and publishing. It is designed to be self-documenting.
+# Run `make help` to see all available commands.
+# ====================================================================================
 
-# Use .ONESHELL to ensure all commands in a recipe run in the same shell
+# --- Shell and Environment Setup ---
+# Use a single shell for each recipe, allowing `cd` and `source` to persist.
 .ONESHELL:
-
+# The default target that runs when `make` is called without arguments.
 .DEFAULT_GOAL := help
 
-# -----------------------------------------------------------------------------
-# Help
-# -----------------------------------------------------------------------------
-help:
+# --- Variables ---
+# Python discovery (prefer python3.11, fallback to python3, then python)
+PY_BOOT       := $(shell command -v python3.11 || command -v python3 || command -v python)
+VENV_DIR      := .venv
+PYTHON        := $(VENV_DIR)/bin/python
+VENV_MARKER   := $(VENV_DIR)/.installed
+SRC_DIR       := matrix_cli
+TEST_DIR      := tests
+BUILD_DIR     := dist
+
+# Terminal colors for help text
+GREEN         := $(shell tput -T screen setaf 2)
+YELLOW        := $(shell tput -T screen setaf 3)
+CYAN          := $(shell tput -T screen setaf 6)
+RESET         := $(shell tput -T screen sgr0)
+
+# --- Core Targets ---
+
+.PHONY: help
+help: ## ✨ Show this help message
+	@echo
 	@echo "Usage: make <target>"
-	@echo ""
-	@echo "Setup & Installation:"
-	@echo "  setup         Create a Python 3.11 virtual environment (falls back to python3/python)"
-	@echo "  install       Install the package in editable mode with [ui,dev] extras"
-	@echo "                (Run 'make setup' first, or ensure venv exists)"
-	@echo ""
-	@echo "Development:"
-	@echo "  lint          Run ruff + flake8"
-	@echo "  fmt           Run black"
-	@echo "  typecheck     Run mypy"
-	@echo "  test          Run pytest"
-	@echo ""
-	@echo "Build & Publish:"
-	@echo "  build         Build sdist & wheel"
-	@echo "  publish       Upload to PyPI via twine"
-	@echo ""
-	@echo "Docs targets:"
-	@echo "  docs-serve    Serve MkDocs site at http://127.0.0.1:8000"
-	@echo "  docs-build    Build MkDocs static site into site/"
-	@echo "  docs-clean    Remove built site/ directory"
-	@echo ""
-	@echo "Terminal:"
-	@echo "  ui            Launch the Matrix UI shell"
-	@echo "  uninstall     Uninstall matrix-cli and (optionally) local SDK"
-	@echo ""
-	@echo "Cleanup:"
-	@echo "  clean         Remove build artifacts, cache, and the virtual environment"
-	@echo "  help          Show this message"
+	@echo
+	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "  $(YELLOW)%-20s$(RESET) %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@echo
 
-# -----------------------------------------------------------------------------
-# Environment setup
-# -----------------------------------------------------------------------------
-setup:
-	@echo "Creating Python virtual environment in $(VENV_DIR) using $(PY_BOOT)..."
-	@if [ -d "$(VENV_DIR)" ]; then \
-		echo "Virtual environment already exists: $(VENV_DIR)"; \
-	else \
-		$(PY_BOOT) -m venv $(VENV_DIR); \
-	fi
-	@echo ""
-	@echo "Activate it with:"
-	@echo "  source $(VENV_DIR)/bin/activate   # Linux/macOS"
-	@echo "  .\\$(VENV_DIR)\\Scripts\\activate  # Windows (CMD/PowerShell)"
+.PHONY: setup
+setup: .venv/pyvenv.cfg ## 🛠️  Create a virtual environment in .venv
 
-install: setup
-	@echo "Installing matrix-cli (editable) with [ui,dev] extras..."
-	. $(VENV_DIR)/bin/activate 2>/dev/null || . $(VENV_DIR)/Scripts/activate
-	python -m pip install --upgrade pip setuptools wheel
-	if [ -d "../matrix-python-sdk" ]; then \
-		echo "Installing local SDK from ../matrix-python-sdk (editable)..."; \
-		python -m pip install -e ../matrix-python-sdk; \
-	fi
-	python -m pip install -e ".[ui,dev]"
+# This is a file-based prerequisite. It will only run if the file doesn't exist.
+.venv/pyvenv.cfg:
+	@echo "-> Creating virtual environment in $(VENV_DIR) using $(PY_BOOT)..."
+	@$(PY_BOOT) -m venv $(VENV_DIR)
 
-# -----------------------------------------------------------------------------
-# Linting & Formatting
-# -----------------------------------------------------------------------------
-lint: install
-	@echo "Running linter (ruff + flake8)…"
-	. $(VENV_DIR)/bin/activate 2>/dev/null || . $(VENV_DIR)/Scripts/activate
-	python -m ruff check $(SRC_DIR) $(TEST_DIR)
-	python -m flake8 $(SRC_DIR) $(TEST_DIR)
+# This target installs dependencies and creates a marker file.
+# It only runs if the marker is missing or if pyproject.toml has changed.
+$(VENV_MARKER): .venv/pyvenv.cfg pyproject.toml
+	@echo "-> Installing/updating dependencies from pyproject.toml..."
+	@$(PYTHON) -m pip install -q --upgrade pip
+	@$(PYTHON) -m pip install -e ".[dev]"
+	@touch $@
 
-fmt: install
-	@echo "Formatting code with black…"
-	. $(VENV_DIR)/bin/activate 2>/dev/null || . $(VENV_DIR)/Scripts/activate
-	python -m black $(SRC_DIR) pyproject.toml mkdocs.yml
+# The `install` target will now always run its recipe to force a reinstall.
+# NOTE: The command lines below MUST be indented with a single TAB character, not spaces.
+.PHONY: install
+install: $(VENV_MARKER) ## 📦 Force re-install of the local package to reflect code changes
+	@echo "-> Forcing re-installation of local package..."
+	# --force-reinstall: Reinstalls the package even if it's already installed.
+	# --no-deps: Avoids re-installing all third-party dependencies, making it much faster.
+	@$(PYTHON) -m pip install --force-reinstall --no-deps -e ".[dev]"
 
-typecheck: install
-	@echo "Running mypy…"
-	. $(VENV_DIR)/bin/activate 2>/dev/null || . $(VENV_DIR)/Scripts/activate
-	python -m mypy $(SRC_DIR)
+# --- Quality Assurance ---
 
-# -----------------------------------------------------------------------------
-# Testing
-# -----------------------------------------------------------------------------
-test: install
-	@echo "Running pytest…"
-	. $(VENV_DIR)/bin/activate 2>/dev/null || . $(VENV_DIR)/Scripts/activate
-	python -m pytest -q --disable-warnings --maxfail=1
+.PHONY: fmt
+fmt: $(VENV_MARKER) ## 🎨 Format code with Black and Ruff
+	@echo "-> Formatting code..."
+	@$(PYTHON) -m black $(SRC_DIR) $(TEST_DIR) pyproject.toml
+	@$(PYTHON) -m ruff format $(SRC_DIR) $(TEST_DIR) pyproject.toml
 
-# -----------------------------------------------------------------------------
-# Build & Publish
-# -----------------------------------------------------------------------------
-build: install
-	@echo "Building source distribution and wheel…"
-	. $(VENV_DIR)/bin/activate 2>/dev/null || . $(VENV_DIR)/Scripts/activate
-	python -m build
+.PHONY: lint
+lint: $(VENV_MARKER) ## 🧹 Lint code with Ruff and Flake8
+	@echo "-> Linting code..."
+	@$(PYTHON) -m ruff check $(SRC_DIR) $(TEST_DIR)
+	@$(PYTHON) -m flake8 $(SRC_DIR) $(TEST_DIR)
 
-publish: build
-	@echo "Publishing to PyPI via twine…"
-	. $(VENV_DIR)/bin/activate 2>/dev/null || . $(VENV_DIR)/Scripts/activate
-	python -m twine upload $(BUILD_DIR)/*
+.PHONY: typecheck
+typecheck: $(VENV_MARKER) ## 🧐 Run Mypy for static type checking
+	@echo "-> Running type checks..."
+	@$(PYTHON) -m mypy $(SRC_DIR)
 
-# -----------------------------------------------------------------------------
-# Documentation (MkDocs)
-# -----------------------------------------------------------------------------
-docs-serve: install
-	@echo "Launching MkDocs dev server…"
-	. $(VENV_DIR)/bin/activate 2>/dev/null || . $(VENV_DIR)/Scripts/activate
-	python -m mkdocs serve
+.PHONY: qa
+qa: fmt lint typecheck ## 💯 Run all quality assurance checks (format, lint, typecheck)
 
-docs-build: install
-	@echo "Building MkDocs static site…"
-	. $(VENV_DIR)/bin/activate 2>/dev/null || . $(VENV_DIR)/Scripts/activate
-	python -m mkdocs build --clean
+# --- Testing ---
 
-docs-clean:
-	@echo "Cleaning MkDocs site/ directory…"
-	rm -rf site/
+.PHONY: test
+test: $(VENV_MARKER) ## 🧪 Run tests with Pytest
+	@echo "-> Running tests..."
+	@$(PYTHON) -m pytest --maxfail=1
 
-# -----------------------------------------------------------------------------
-# UI Launcher & Uninstall
-# -----------------------------------------------------------------------------
-ui: install
-	@echo "Launching Matrix UI shell..."
-	. $(VENV_DIR)/bin/activate 2>/dev/null || . $(VENV_DIR)/Scripts/activate
-	matrix
+# --- Build & Release ---
 
-uninstall:
-	@echo "Uninstalling matrix-cli (and local SDK if installed)…"
-	. $(VENV_DIR)/bin/activate 2>/dev/null || . $(VENV_DIR)/Scripts/activate
-	python -m pip uninstall -y matrix-cli || true
-	if python -c "import pkgutil,sys; sys.exit(0 if pkgutil.find_loader('matrix_sdk') else 1)"; then \
-		python -m pip uninstall -y matrix-python-sdk || true; \
-	fi
+.PHONY: build
+build: $(VENV_MARKER) ## 🏗️  Build sdist and wheel packages
+	@echo "-> Building distribution packages..."
+	@rm -rf $(BUILD_DIR) build
+	@$(PYTHON) -m build
 
-# -----------------------------------------------------------------------------
-# Cleanup
-# -----------------------------------------------------------------------------
-clean:
-	@echo "Removing build artifacts, caches, and virtual environment…"
-	rm -rf $(BUILD_DIR) *.egg-info
-	rm -rf site/
-	rm -rf $(CACHE_DIR)
-	rm -rf $(VENV_DIR)
-	@find . -type f -name "*.pyc" -delete
+.PHONY: publish
+publish: build ## 🚀 Upload packages to PyPI using Twine
+	@echo "-> Publishing to PyPI..."
+	@$(PYTHON) -m twine upload $(BUILD_DIR)/*
+
+# --- Documentation ---
+
+.PHONY: docs-serve
+docs-serve: $(VENV_MARKER) ## 📖 Serve documentation locally with MkDocs
+	@echo "-> Serving docs at http://127.0.0.1:8000"
+	@$(PYTHON) -m mkdocs serve
+
+.PHONY: docs-build
+docs-build: $(VENV_MARKER) ## 📑 Build the documentation site
+	@echo "-> Building documentation site..."
+	@$(PYTHON) -m mkdocs build --clean
+
+# --- Maintenance ---
+
+.PHONY: uninstall
+uninstall: ## 🗑️  Uninstall the project and its core dependencies
+	@echo "-> Uninstalling packages..."
+	@if [ -f "$(PYTHON)" ]; then $(PYTHON) -m pip uninstall -y matrix-cli matrix-python-sdk || true; fi
+
+.PHONY: clean
+clean: ## 🧹 Remove build artifacts, caches, and the virtual environment
+	@echo "-> Cleaning up project files..."
+	@rm -rf $(BUILD_DIR) build *.egg-info .pytest_cache .mypy_cache .ruff_cache site/ coverage.xml
 	@find . -type d -name "__pycache__" -exec rm -rf {} +
-
-# -----------------------------------------------------------------------------
-# Phony targets
-# -----------------------------------------------------------------------------
-.PHONY: help setup install lint fmt typecheck test build publish docs-serve docs-build docs-clean ui uninstall clean
+	@if [ -d "$(VENV_DIR)" ]; then rm -rf $(VENV_DIR); fi

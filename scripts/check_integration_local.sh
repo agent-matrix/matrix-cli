@@ -1,0 +1,1 @@
+python scripts/check_integration_local.py

@@ -1,138 +1,79 @@
+
+# matrix_cli/__main__.py
 from __future__ import annotations
-
-import importlib
 import sys
-from importlib import metadata
-from typing import Optional
-
 import typer
 
-from .config import MatrixCLIConfig, load_config
+# ---- OPTIMIZED FAST PATHS ----
+# Handle `matrix --version` and `matrix -V` without importing the full CLI
+if len(sys.argv) == 2 and sys.argv[1] in {"--version", "-V"}:
+    try:
+        from importlib.metadata import version as _v
+        print(_v("matrix-cli"))
+    except Exception:
+        print("0+unknown")
+    raise SystemExit(0)
 
-# Try to import the REPL exit exception so we can exit cleanly
-try:  # pragma: no cover - optional dependency handling
-    from click_repl.exceptions import ExitReplException  # type: ignore
-except Exception:  # pragma: no cover
-    ExitReplException = None  # type: ignore
+# Handle `matrix version ...` by only loading the version command
+if len(sys.argv) > 1 and sys.argv[1] == "version":
+    try:
+        from matrix_cli.commands.version import app as version_app
+        version_app(args=sys.argv[2:], prog_name="matrix version")
+    except Exception as e:
+        print(f"Error loading version command: {e}", file=sys.stderr)
+        raise SystemExit(1)
+    raise SystemExit(0)
 
-# Create the top-level Typer app
-app = typer.Typer(
-    name="matrix",
-    help="Matrix Hub CLI — search, show, install agents/tools, and manage remotes.",
-    add_completion=True,
-    no_args_is_help=False,  # allow zero-arg invocation
+# ---- STANDARD COMMAND REGISTRATION ----
+from .commands import (
+    alias as cmd_alias,
+    doctor as cmd_doctor,
+    handle_url as cmd_handle_url,
+    install as cmd_install,
+    link as cmd_link,
+    logs as cmd_logs,
+    ps as cmd_ps,
+    remotes as cmd_remotes,
+    run as cmd_run,
+    search as cmd_search,
+    show as cmd_show,
+    stop as cmd_stop,
+    version as cmd_version,
 )
 
+app = typer.Typer(
+    help="Matrix CLI — A thin UX layer over the matrix-python-sdk.",
+    no_args_is_help=True,
+    add_completion=False,  # Minor optimization for faster startup
+)
 
-def _register_subapp(module_name: str, name: str) -> None:
-    """
-    Dynamically import a commands module that is expected to expose `app: Typer`,
-    then attach it as a subcommand group under `name`.
-    """
-    try:
-        mod = importlib.import_module(module_name)
-    except Exception as exc:  # pragma: no cover - defensive
-        typer.echo(f"[warn] Unable to load commands from {module_name}: {exc}", err=True)
-        return
+# Core workflow commands (bind functions directly for clean parsing)
+app.command("install")(cmd_install.main)
+app.command("run")(cmd_run.main)
+app.command("ps")(cmd_ps.main)
+app.command("logs")(cmd_logs.main)
+app.command("stop")(cmd_stop.main)
+app.command("doctor")(cmd_doctor.main)
+app.command("search")(cmd_search.main)
+app.command("show")(cmd_show.main)
 
-    sub = getattr(mod, "app", None)
-    if sub is None:  # pragma: no cover
-        typer.echo(f"[warn] Module {module_name} does not export `app`", err=True)
-        return
+# Command groups (sub-commands)
+app.add_typer(cmd_alias.app, name="alias", help="Manage local component aliases.")
+app.add_typer(cmd_link.app, name="link", help="Link a local folder as an alias.")
+app.add_typer(cmd_remotes.app, name="remotes", help="Manage Hub remote catalogs.")
+app.add_typer(cmd_version.app, name="version", help="Show CLI and SDK versions.")
 
-    app.add_typer(sub, name=name)
-
-
-# Register command groups
-_register_subapp("matrix_cli.commands.search", "search")
-_register_subapp("matrix_cli.commands.show", "show")
-_register_subapp("matrix_cli.commands.install", "install")
-_register_subapp("matrix_cli.commands.list", "list")
-_register_subapp("matrix_cli.commands.remotes", "remotes")
-
-
-def _version_string() -> str:
-    try:
-        return metadata.version("matrix-cli")
-    except metadata.PackageNotFoundError:  # pragma: no cover
-        return "0.0.0"
-
-
-@app.callback(invoke_without_command=True)
-def _global_options(
-    ctx: typer.Context,
-    base_url: Optional[str] = typer.Option(
-        None,
-        "--base-url",
-        help="Override registry base URL for this command (e.g., http://localhost:7300).",
-        show_default=False,
-    ),
-    token: Optional[str] = typer.Option(
-        None,
-        "--token",
-        help="Override registry bearer token for this command.",
-        show_default=False,
-    ),
-    verbose: bool = typer.Option(
-        False,
-        "--verbose",
-        "-v",
-        help="Verbose output.",
-    ),
-    version: Optional[bool] = typer.Option(
-        None,
-        "--version",
-        help="Show matrix-cli version and exit.",
-        is_eager=True,
-    ),
-) -> None:
-    """
-    Loads configuration once per process and exposes it to subcommands via ctx.obj.
-    Allows per-invocation overrides for base URL and token.
-    If no subcommand is given, hand off to the interactive Matrix Shell UI.
-    """
-    if version:
-        typer.echo(f"matrix-cli {_version_string()}")
-        raise typer.Exit(code=0)
-
-    # Load and override config
-    cfg: MatrixCLIConfig = load_config()
-    if base_url:
-        cfg.registry_url = base_url
-    if token:
-        cfg.registry_token = token
-
-    ctx.obj = cfg
-
-    if verbose:
-        typer.echo(
-            f"[matrix-cli] registry={cfg.registry_url} "
-            f"gateway={cfg.gateway_url} cache_dir={cfg.cache_dir}"
-        )
-
-    # If no Typer subcommand was given, invoke the Click-based UI.
-    if ctx.invoked_subcommand is None:
-        from matrix_cli.ui.cli import main as ui_main
-
-        # Forward any leftover CLI args (e.g., "exit") to the Click UI.
-        ui_args = list(ctx.args or [])
-        try:
-            ui_main(standalone_mode=False, args=ui_args)
-        except SystemExit:
-            # Normal Click termination
-            raise
-        except Exception as exc:
-            # If the UI raised click-repl's ExitReplException, exit cleanly
-            if ExitReplException and isinstance(exc, ExitReplException):
-                raise SystemExit(0)
-            # Otherwise, re-raise the original error
-            raise
-
+# Hidden internal commands
+app.add_typer(
+    cmd_handle_url.app,
+    name="handle-url",
+    help="[Internal] Handle matrix:// deep links.",
+    hidden=True,
+)
 
 def main() -> None:
+    """The main entry point for the CLI application."""
     app()
 
-
 if __name__ == "__main__":
-    # When run as a module: python -m matrix_cli
-    sys.exit(main())
+    main()
