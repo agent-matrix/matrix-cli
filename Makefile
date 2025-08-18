@@ -7,13 +7,10 @@
 # ====================================================================================
 
 # --- Shell and Environment Setup ---
-# Use a single shell for each recipe, allowing `cd` and `source` to persist.
 .ONESHELL:
-# The default target that runs when `make` is called without arguments.
 .DEFAULT_GOAL := help
 
 # --- Variables ---
-# Python discovery (prefer python3.11, fallback to python3, then python)
 PY_BOOT       := $(shell command -v python3.11 || command -v python3 || command -v python)
 VENV_DIR      := .venv
 PYTHON        := $(VENV_DIR)/bin/python
@@ -21,6 +18,11 @@ VENV_MARKER   := $(VENV_DIR)/.installed
 SRC_DIR       := matrix_cli
 TEST_DIR      := tests
 BUILD_DIR     := dist
+
+# Which extras to install from pyproject.toml:
+#   dev  = full toolchain (tests, lint, format, typecheck, build, publish, docs)
+#   test = only the test tools (pytest, pytest-cov, pytest-mock)
+EXTRAS        ?= dev
 
 # Terminal colors for help text
 GREEN         := $(shell tput -T screen setaf 2)
@@ -41,27 +43,28 @@ help: ## ✨ Show this help message
 .PHONY: setup
 setup: .venv/pyvenv.cfg ## 🛠️  Create a virtual environment in .venv
 
-# This is a file-based prerequisite. It will only run if the file doesn't exist.
 .venv/pyvenv.cfg:
 	@echo "-> Creating virtual environment in $(VENV_DIR) using $(PY_BOOT)..."
 	@$(PY_BOOT) -m venv $(VENV_DIR)
 
-# This target installs dependencies and creates a marker file.
-# It only runs if the marker is missing or if pyproject.toml has changed.
+# Install deps once (or when pyproject.toml changes)
 $(VENV_MARKER): .venv/pyvenv.cfg pyproject.toml
-	@echo "-> Installing/updating dependencies from pyproject.toml..."
-	@$(PYTHON) -m pip install -q --upgrade pip
-	@$(PYTHON) -m pip install -e ".[dev]"
+	@echo "-> Installing/updating dependencies from pyproject.toml (extras: $(EXTRAS))..."
+	@$(PYTHON) -m pip install -q --upgrade pip setuptools wheel
+	@$(PYTHON) -m pip install -e ".[$(EXTRAS)]"
 	@touch $@
 
-# The `install` target will now always run its recipe to force a reinstall.
-# NOTE: The command lines below MUST be indented with a single TAB character, not spaces.
 .PHONY: install
 install: $(VENV_MARKER) ## 📦 Force re-install of the local package to reflect code changes
-	@echo "-> Forcing re-installation of local package..."
-	# --force-reinstall: Reinstalls the package even if it's already installed.
-	# --no-deps: Avoids re-installing all third-party dependencies, making it much faster.
-	@$(PYTHON) -m pip install --force-reinstall --no-deps -e ".[dev]"
+	@echo "-> Forcing re-installation of local package (extras: $(EXTRAS))..."
+	@$(PYTHON) -m pip install --force-reinstall --no-deps -e ".[$(EXTRAS)]"
+
+# Convenience: install only test tools (pytest, pytest-cov, pytest-mock)
+.PHONY: install-test-tools
+install-test-tools: .venv/pyvenv.cfg ## 🧪 Install only test tools (pytest, pytest-cov, pytest-mock)
+	@echo "-> Installing test extras..."
+	@$(PYTHON) -m pip install -q --upgrade pip setuptools wheel
+	@$(PYTHON) -m pip install -e ".[test]"
 
 # --- Quality Assurance ---
 
@@ -87,10 +90,15 @@ qa: fmt lint typecheck ## 💯 Run all quality assurance checks (format, lint, t
 
 # --- Testing ---
 
+# IMPORTANT: Do not depend on $(VENV_MARKER) so running tests won't reinstall anything.
 .PHONY: test
-test: $(VENV_MARKER) ## 🧪 Run tests with Pytest
+test: .venv/pyvenv.cfg ## 🧪 Run tests with Pytest (no re-install)
 	@echo "-> Running tests..."
-	@$(PYTHON) -m pytest --maxfail=1
+	@if [ ! -x "$(VENV_DIR)/bin/pytest" ]; then \
+		echo "!! pytest not found in $(VENV_DIR). Run 'make install-test-tools' or 'make install' first."; \
+		exit 1; \
+	fi
+	@$(VENV_DIR)/bin/pytest --maxfail=1
 
 # --- Build & Release ---
 
@@ -119,14 +127,4 @@ docs-build: $(VENV_MARKER) ## 📑 Build the documentation site
 
 # --- Maintenance ---
 
-.PHONY: uninstall
-uninstall: ## 🗑️  Uninstall the project and its core dependencies
-	@echo "-> Uninstalling packages..."
-	@if [ -f "$(PYTHON)" ]; then $(PYTHON) -m pip uninstall -y matrix-cli matrix-python-sdk || true; fi
-
-.PHONY: clean
-clean: ## 🧹 Remove build artifacts, caches, and the virtual environment
-	@echo "-> Cleaning up project files..."
-	@rm -rf $(BUILD_DIR) build *.egg-info .pytest_cache .mypy_cache .ruff_cache site/ coverage.xml
-	@find . -type d -name "__pycache__" -exec rm -rf {} +
-	@if [ -d "$(VENV_DIR)" ]; then rm -rf $(VENV_DIR); fi
+.P
