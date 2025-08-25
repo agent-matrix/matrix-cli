@@ -109,6 +109,10 @@ matrix connection
 matrix connection --json --timeout 3.0
 ```
 
+## Matrix CLI Demo
+
+![Matrix CLI Demo](assets/matrix-cli-demo.gif)
+
 ---
 
 ## 🔍 Search tips
