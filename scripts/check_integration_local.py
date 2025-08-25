@@ -12,13 +12,12 @@ Prerequisites:
 
 Exit code is 0 if all checks pass, non-zero otherwise.
 """
+
 from __future__ import annotations
 
 import os
 import sys
 import tempfile
-from pathlib import Path
-from typing import List, Tuple
 
 from typer.testing import CliRunner
 
@@ -27,9 +26,11 @@ from matrix_cli.__main__ import app
 
 # --- Helper function for checking results ---
 
+
 def out_of(result) -> str:
     """Support both Click 7 (result.output) and Click 8+ (result.stdout)"""
     return getattr(result, "stdout", getattr(result, "output", ""))
+
 
 def must_ok(
     label: str,
@@ -41,7 +42,7 @@ def must_ok(
 ) -> bool:
     """Unified assertion helper (case-insensitive contains checks)."""
     text = out_of(result)
-    ok = (result.exit_code == expect_exit)
+    ok = result.exit_code == expect_exit
     print(f"\n--> {label}")
     print(text.strip())
 
@@ -57,7 +58,9 @@ def must_ok(
     print(f"--> Status: {status} (Exit: {result.exit_code})")
     return ok
 
+
 # --- Main test logic ---
+
 
 def main() -> int:
     """Runs the integration test lifecycle."""
@@ -83,10 +86,14 @@ def main() -> int:
 
             # 2. --- SEARCH ---
             r_search = runner.invoke(app, ["search", search_term])
-            all_passed &= must_ok("Search", r_search, contains_all=["result", "mcp_server"])
+            all_passed &= must_ok(
+                "Search", r_search, contains_all=["result", "mcp_server"]
+            )
 
             # 3. --- INSTALL ---
-            r_install = runner.invoke(app, ["install", component_to_test, "--alias", alias])
+            r_install = runner.invoke(
+                app, ["install", component_to_test, "--alias", alias]
+            )
             all_passed &= must_ok("Install", r_install, contains="installed")
 
             # 4. --- RUN & MANAGE ---
@@ -94,7 +101,9 @@ def main() -> int:
             all_passed &= must_ok("Run", r_run, contains="started")
 
             r_ps = runner.invoke(app, ["ps"])
-            all_passed &= must_ok("Check PS (running)", r_ps, contains_all=["1 running", alias])
+            all_passed &= must_ok(
+                "Check PS (running)", r_ps, contains_all=["1 running", alias]
+            )
 
             r_doc_ok = runner.invoke(app, ["doctor", alias])
             all_passed &= must_ok("Check Doctor (OK)", r_doc_ok, contains="ok")
@@ -104,7 +113,9 @@ def main() -> int:
             all_passed &= must_ok("Stop", r_stop, contains="stopped")
 
             r_ps_after = runner.invoke(app, ["ps"])
-            all_passed &= must_ok("Check PS (stopped)", r_ps_after, contains="0 running")
+            all_passed &= must_ok(
+                "Check PS (stopped)", r_ps_after, contains="0 running"
+            )
 
         except Exception as e:
             print(f"\n--- A critical error occurred: {e} ---", file=sys.stderr)

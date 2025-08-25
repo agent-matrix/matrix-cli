@@ -1,204 +1,360 @@
-
 # Matrix CLI
 
-**Official command-line interface for Matrix Hub**
-Search, inspect, install, and run agents/tools — plus manage remote catalogs.
+Official command-line interface for **Matrix Hub** — search, inspect, install, run, probe MCP servers, manage remotes, check connectivity, and safely uninstall.
+
+> Requires **Python 3.11+** and the **matrix-python-sdk ≥ 0.1.5**.
 
 ---
 
-## ✨ What’s in this version (0.1.1)
+## 🚀 What’s new in v0.1.2
 
-* **Fast, reliable search**
-
-  * Pending results **included by default** so you actually find things.
-  * `--certified` to filter to registered/certified only.
-  * `--json` for raw payloads, `--exact` to fetch a specific ID, `--show-status` to print `(pending)`/`(certified)`.
-  * If the public hub can’t be reached, the CLI **tries your local dev hub once** and tells you.
-
-* **Smarter installs (one call in the common case)**
-
-  * Install by short name: `matrix install hello-sse-server` → resolves to `mcp_server:hello-sse-server@<latest>`.
-  * If `@version` is omitted, the resolver picks **latest** (prefers stable > pre-release).
-  * Prefers **`mcp_server`** when no namespace is given.
-  * Uses a tiny on-disk cache (`~/.matrix/cache/resolve.json`, \~5 min TTL) to avoid repeat lookups.
-  * If the public hub can’t be reached, build **falls back to local dev hub** once.
-
-* **Better “run” UX**
-
-  * After start, prints a **clickable URL** and **health URL** alongside the logs hint.
-
-* **Process management**
-
-  * `ps`, `logs`, `stop`, and `doctor` to manage and verify local processes.
-
-* **Remotes management**
-
-  * `remotes list|add|ingest|remove` to manage remote catalogs.
-
-> Requires **Python 3.11+** and **matrix-python-sdk ≥ 0.1.2**.
+* **`matrix connection`** — quick Hub health check
+  Human output or `--json` (exit code **0** healthy, **2** unhealthy).
+* **`matrix mcp`** — probe/call local MCP servers (SSE/WebSocket)
+  `matrix mcp probe --alias <name>` auto-discovers the port; or pass `--url`.
+* **Safer installs** — no local absolute paths sent to the Hub
+  The CLI sends `<alias>/<version>` to the Hub and materializes locally.
+* **`matrix ps` shows URL** and now supports **`--plain`** and **`--json`** for scripting.
+* **`matrix uninstall`** — safe, scriptable uninstaller for one/many aliases, with optional `--purge` of files.
+* **TLS hardening** — consistent certificate verification (env CA/OS trust/certifi).
 
 ---
 
-## 🔧 Install
+## 📦 Install
 
 ```bash
-# Via pipx (recommended)
+# Recommended
 pipx install matrix-cli
 
-# Or via pip
+# Or with pip (active virtualenv)
 pip install matrix-cli
+```
+
+### Optional extras
+
+```bash
+# Add MCP client (SSE works; WebSocket needs `websockets`)
+pip install "matrix-cli[mcp]"   # installs mcp>=1.13.1
+
+# If you want WebSocket probing too:
+pip install websockets
+
+# Dev extras (linting, tests, docs)
+pip install "matrix-cli[dev]"
+
+# Using pipx? You can inject extras later:
+pipx inject matrix-cli mcp websockets
 ```
 
 ---
 
 ## ⚙️ Configuration
 
-Matrix CLI reads (in order of precedence):
+The CLI reads, in order: **environment variables**, `~/.config/matrix/cli.toml` (optional), then built-ins.
 
-1. **Environment variables**
-2. Optional **TOML** at `~/.config/matrix/cli.toml`
-3. Built-in defaults
-
-### Environment variables
+### Environment
 
 ```bash
-export MATRIX_HUB_BASE=https://api.matrixhub.io   # or http://localhost:443
-export MATRIX_HUB_TOKEN=...                       # optional
-export MATRIX_HOME=~/.matrix                      # optional; default is ~/.matrix
+export MATRIX_HUB_BASE="https://api.matrixhub.io"   # or your dev hub
+export MATRIX_HUB_TOKEN="..."                       # optional
+export MATRIX_HOME="$HOME/.matrix"                  # optional; default ~/.matrix
+
+# TLS (corporate CA/proxy)
+export SSL_CERT_FILE=/path/to/ca.pem
+# or
+export REQUESTS_CA_BUNDLE=/path/to/ca.pem
+
+# ps URL host override (display only)
+export MATRIX_PS_HOST="localhost"
 ```
 
 ### Optional TOML (`~/.config/matrix/cli.toml`)
 
 ```toml
-hub_base = "https://api.matrixhub.io"  # or "http://localhost:443"
-token = ""                             # optional
-home = "~/.matrix"                     # optional
+hub_base = "https://api.matrixhub.io"
+token    = ""
+home     = "~/.matrix"
 ```
 
 ---
 
-## 🚀 Quick start
+## 🏁 Quick start
 
 ```bash
-# Version / help
+# Basics
 matrix --version
-matrix --help
+matrix help
 matrix version
 
 # Search (includes pending by default)
 matrix search "hello"
 
-# Certified-only search
-matrix search "hello" --certified
+# Filtered search
+matrix search "hello" --type mcp_server --limit 5
 
-# Programmatic JSON results
-matrix search "hello" --json --limit 10
+# Install (short name resolves to mcp_server:<name>@<latest>)
+matrix install hello-sse-server --alias hello-sse-server
 
-# Exact entity by ID
-matrix search "mcp_server:hello-sse-server@0.1.0" --exact
-
-# Install by short name (picks latest, prefers mcp_server)
-matrix install hello-sse-server
-
-# Or install specific version / fully qualified
-matrix install mcp_server:hello-sse-server@0.1.0
-
-# Run & open
+# Run and inspect
 matrix run hello-sse-server
-# (prints: Open in browser / Health / logs hint)
-
-# Show details (pretty-prints JSON by default)
-matrix show mcp_server:hello-sse-server@0.1.0
-
-# Manage processes
-matrix ps
+matrix ps                                # shows URL column
 matrix logs hello-sse-server -f
 matrix stop hello-sse-server
-matrix doctor hello-sse-server
 
-# Remotes (catalogs)
-matrix remotes list
-matrix remotes add https://example.com/catalog.json --name example
-matrix remotes ingest example
-matrix remotes remove example
+# Show raw details
+matrix show mcp_server:hello-sse-server@0.1.0
+
+# Hub health (human / JSON for CI)
+matrix connection
+matrix connection --json --timeout 3.0
 ```
 
 ---
 
 ## 🔍 Search tips
 
-* Pending results are **included by default** for better coverage. Use `--certified` for registered-only.
-* Useful filters:
+Useful filters:
 
-  * `--type {agent|tool|mcp_server}`
-  * `--mode {keyword|semantic|hybrid}`
-  * `--capabilities rag,sql`
-  * `--frameworks langchain,autogen`
-  * `--providers openai,anthropic`
-  * `--with-snippets`
+* `--type {agent|tool|mcp_server}`
+* `--mode {keyword|semantic|hybrid}`
+* `--capabilities rag,sql`
+* `--frameworks langchain,autogen`
+* `--providers openai,anthropic`
+* `--with-snippets`
+* `--certified` (registered/certified only)
+* `--json` for programmatic output
+* `--exact` to fetch a specific ID
 
 Examples:
 
 ```bash
-# mcp servers about hello
+# MCP servers about "hello"
 matrix search "hello" --type mcp_server --limit 5
 
-# Hybrid mode, with snippets
+# Hybrid mode with snippets
 matrix search "vector" --mode hybrid --with-snippets
 
-# Programmatic consumption
+# Structured results
 matrix search "sql agent" --capabilities rag,sql --json
 ```
 
-If the public hub is unreachable, the CLI will try your local dev hub at `http://localhost:443` once and let you know.
+> If the public Hub is unreachable, some operations try a **local dev Hub** once and tell you.
 
 ---
 
-## 🧠 Install resolver behavior
+## 🧩 Install behavior (safer by design)
 
-* Accepts: `name`, `name@1.2.3`, `ns:name`, `ns:name@1.2.3`.
-* If `ns` is missing, **prefers `mcp_server`** candidates.
-* If `@version` is missing, picks **latest** (stable > pre-release, then highest).
-* Uses a tiny, short-lived cache under `~/.matrix/cache/resolve.json` per hub.
-* On DNS/connection failures to the public hub, tries `http://localhost:443` once.
+* Accepts `name`, `name@ver`, `ns:name`, `ns:name@ver`
+* If `ns` missing, prefers **`mcp_server`**
+* If `@version` missing, picks **latest** (stable > pre-release)
+* Uses a small cache under `~/.matrix/cache/resolve.json` (per-hub, short TTL)
+* **No absolute paths sent to the Hub** — the CLI sends a safe `<alias>/<version>` label, then **materializes locally**
+* Preflight checks ensure your local target is **writable** before network calls
 
----
-
-## 🩺 Health & processes
+Examples:
 
 ```bash
-# Start a server by alias
-matrix run my-alias
-# → prints: PID, Port, Open in browser, Health URL, and logs hint
+# Short name; alias is optional (auto-suggested if omitted)
+matrix install hello-sse-server --alias hello-sse-server
 
-# Check health of a running alias
-matrix doctor my-alias
+# Specific version
+matrix install mcp_server:hello-sse-server@0.1.0
+
+# Custom target
+matrix install hello-sse-server --target ~/.matrix/runners/hello-sse-server/0.1.0
 ```
 
 ---
 
-## 🛠️ Remotes
+## ▶️ Run UX (with handy next steps)
+
+`matrix run <alias>` prints a click-ready **URL** and **Health** link, plus a logs hint.
+Typical follow-ups you can run immediately:
 
 ```bash
-matrix remotes list
-matrix remotes add https://raw.githubusercontent.com/your-org/catalog/main/index.json --name official
-matrix remotes ingest official
-matrix remotes remove official
+# Probe tools exposed by your local MCP server (auto-discovers port)
+matrix mcp probe --alias hello-sse-server
+
+# Call a tool (optional args as JSON)
+matrix mcp call hello --alias hello-sse-server --args '{}'
 ```
 
 ---
 
-## ❓ Troubleshooting
+## 🧪 MCP utilities (SSE/WS)
 
-* **No results?** Try `--certified` (if you only want registered) or omit it to include pending.
-  If your catalog isn’t ingested yet:
-  `matrix remotes ingest <remote-name>`
-* **Offline?** The CLI will attempt a one-time fallback to `http://localhost:443` where applicable.
-* **Install by name fails?** Try a more specific query in `matrix search`, then install using the fully qualified ID.
+Probe and call tools on local MCP servers.
+
+```bash
+# Probe by alias (auto-discovers port; infers endpoint from runner.json or uses /messages/)
+matrix mcp probe --alias hello-sse-server
+
+# Or probe by full SSE URL
+matrix mcp probe --url http://127.0.0.1:52305/messages/
+
+# Call a tool (optional args as JSON)
+matrix mcp call hello --alias hello-sse-server --args '{}'
+
+# JSON mode for scripts
+matrix mcp probe --alias hello-sse-server --json
+```
+
+Notes:
+
+* SSE works with `mcp>=1.13.1` (installed via the `mcp` extra).
+* WebSocket URLs (`ws://`/`wss://`) require the `websockets` package.
+* For non-running aliases, you’ll get helpful suggestions based on `matrix ps`.
+
+---
+
+## 🧭 Process management
+
+`matrix ps` shows a **URL** column constructed from the runner’s port and endpoint
+(auto-read from `runner.json` where possible, default `/messages/`):
+
+```
+┏━━━━━━━━━━━━━━━━━━┳━━━━━━┳━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ ALIAS            ┃  PID ┃  PORT ┃ UPTIME   ┃ URL                              ┃ TARGET                           ┃
+┡━━━━━━━━━━━━━━━━━━╇━━━━━━╇━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ hello-sse-server │ 1234 ┃ 52305 ┃ 02:18:44 │ http://127.0.0.1:52305/messages/ │ ~/.matrix/runners/hello…/0.1.0   │
+└──────────────────┴──────┴───────┴──────────┴──────────────────────────────────┴──────────────────────────────────┘
+```
+
+Copy the URL directly into:
+
+```bash
+matrix mcp probe --url http://127.0.0.1:52305/messages/
+```
+
+Script-friendly output:
+
+```bash
+# Plain (space-delimited): alias pid port uptime_seconds url target
+matrix ps --plain
+
+# JSON: array of objects with {alias,pid,port,uptime_seconds,url,target}
+matrix ps --json
+```
+
+Other commands:
+
+```bash
+matrix logs <alias> [-f]
+matrix stop <alias>
+matrix doctor <alias>
+```
+
+---
+
+## 🌐 Hub health & TLS
+
+```bash
+# Quick Hub health
+matrix connection
+matrix connection --json
+```
+
+TLS policy:
+
+* Respects `REQUESTS_CA_BUNDLE` / `SSL_CERT_FILE`
+* Tries OS trust (when available)
+* Falls back to `certifi`
+* Never throws on network errors in health checks — returns a structured status with exit codes.
+
+---
+
+## 🧹 Safe uninstall
+
+Remove one or many aliases, and optionally purge local files.
+
+```bash
+# Uninstall one alias (keeps files by default)
+matrix uninstall hello-sse-server
+
+# Uninstall several and also delete files (safe paths only)
+matrix uninstall hello-a hello-b --purge
+
+# Remove everything from the local alias store (stop first, purge files)
+matrix uninstall --all --force-stop --purge -y
+
+# Dry-run (show what would be removed)
+matrix uninstall --all --dry-run
+```
+
+Safety features:
+
+* Only purges targets under `~/.matrix/runners` by default.
+* Skips deleting files still referenced by other aliases.
+* `--force-files` allows deleting outside the safe path (⚠️ DANGEROUS; off by default).
+* `--stopped-only` to avoid touching running aliases.
+
+Exit codes: **0** success, **2** partial/failed.
+
+---
+
+## 🧰 Scripting & CI examples
+
+```bash
+# Search, parse with jq, then install the first result
+results=$(matrix search "ocr table" --type tool --json)
+first_id=$(echo "$results" | jq -r '.items[0].id')
+matrix install "$first_id" --alias ocr-table --force --no-prompt
+
+# Health check in CI (exit code 0/2)
+matrix connection --json
+
+# Get the port quickly for an alias
+port=$(matrix ps --plain | awk '$1=="hello-sse-server"{print $3; exit}')
+matrix mcp probe --url "http://127.0.0.1:${port}/messages/" --json
+```
+
+---
+
+## 🐞 Troubleshooting
+
+* **“Missing 'mcp' package”**
+  Install the optional extra: `pip install "matrix-cli[mcp]"`
+  (For WebSocket endpoints also: `pip install websockets`.)
+
+* **TLS / certificate errors**
+  Set `SSL_CERT_FILE` or `REQUESTS_CA_BUNDLE` to your CA bundle:
+
+  ```bash
+  export SSL_CERT_FILE=/path/to/ca.pem
+  # or
+  export REQUESTS_CA_BUNDLE=/path/to/ca.pem
+  ```
+
+* **Alias not found when probing**
+  Use the alias shown by `matrix ps` (case-insensitive match supported), or pass `--url` directly.
+
+---
+
+## 🛠️ Development
+
+```bash
+# Create venv and install (editable) with useful extras
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install -U pip
+pip install -e ".[ui,dev,mcp]"
+
+# Common tasks (Makefile may vary by repo)
+make lint       # ruff/flake8
+make fmt        # black
+make typecheck  # mypy
+make test       # pytest
+make build      # sdist + wheel
+```
 
 ---
 
 ## 📄 License
 
-Apache License 2.0 © ruslanmv.com
+Apache License 2.0
 
+---
+
+## ✉️ Feedback
+
+Issues and PRs welcome! If you hit rough edges with install/probing/health or the new `ps --plain/--json` and `uninstall` flows, please open an issue including your command, output, and environment details.

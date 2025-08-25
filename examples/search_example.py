@@ -73,11 +73,11 @@ def do_search(hub: MatrixClient, query: str) -> None:
     try:
         res = hub.search(
             q=query,
-            type="any",           # across agents, tools, mcp_server
-            mode="hybrid",        # "keyword" | "semantic" | "hybrid"
+            type="any",  # across agents, tools, mcp_server
+            mode="hybrid",  # "keyword" | "semantic" | "hybrid"
             limit=5,
-            with_snippets=True,   # ask server for snippets if supported
-            include_pending=True, # show unregistered entities (useful in dev)
+            with_snippets=True,  # ask server for snippets if supported
+            include_pending=True,  # show unregistered entities (useful in dev)
             # with_rag=False,     # safe to add if your Hub supports it
             # rerank="none",
         )
@@ -89,7 +89,7 @@ def do_search(hub: MatrixClient, query: str) -> None:
 
 def main():
     hub = MatrixClient(base_url=BASE, token=TOKEN)
-    for q in ("hello", "hello-sse-server","mcp_server:hello-sse-server@0.1.0"):
+    for q in ("hello", "hello-sse-server", "mcp_server:hello-sse-server@0.1.0"):
         do_search(hub, q)
 
 

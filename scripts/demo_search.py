@@ -44,6 +44,7 @@ except Exception:
 
 # ---------------------------- Helpers: formatting & normalization ---------------------------- #
 
+
 def _to_dict(obj: Any) -> Dict[str, Any]:
     """Convert Pydantic v2/v1 models or dicts into plain dicts (no hard dependency on pydantic)."""
     if isinstance(obj, dict):
@@ -60,7 +61,7 @@ def _to_dict(obj: Any) -> Dict[str, Any]:
     as_dict = getattr(obj, "dict", None)
     if callable(as_dict):
         try:
-            return as_dict()          # pydantic v1
+            return as_dict()  # pydantic v1
         except Exception:
             pass
     dump_json = getattr(obj, "model_dump_json", None)
@@ -134,7 +135,9 @@ def _row_text(
 
 
 def _print_case_header(n: int, title: str, params: Dict[str, Any]) -> None:
-    pretty = ", ".join(f"{k}={v!r}" for k, v in params.items() if v not in (None, "", False))
+    pretty = ", ".join(
+        f"{k}={v!r}" for k, v in params.items() if v not in (None, "", False)
+    )
     print(f"\n=== {n:02d}) {title}")
     if pretty:
         print(f"    Params: {pretty}")
@@ -165,13 +168,15 @@ def _print_results(
     return pending_count
 
 
-def _search_once(client: MatrixClient, params: Dict[str, Any], *, retries: int, wait: float):
+def _search_once(
+    client: MatrixClient, params: Dict[str, Any], *, retries: int, wait: float
+):
     """One search call with a tiny retry budget to keep network traffic low."""
     attempt = 0
     while True:
         try:
             return client.search(**params)
-        except Exception as e:
+        except Exception:
             attempt += 1
             if attempt > max(0, retries):
                 raise
@@ -182,15 +187,20 @@ def _norm_params(params: Dict[str, Any]) -> str:
     """Canonical hashable string for caching/deduping identical requests."""
     return json.dumps(params, sort_keys=True, separators=(",", ":"))
 
+
 # ---------------------------- Demo cases ---------------------------- #
 
-def build_cases(query: str, limit: int, *, certified_only: bool) -> List[Tuple[str, Dict[str, Any]]]:
+
+def build_cases(
+    query: str, limit: int, *, certified_only: bool
+) -> List[Tuple[str, Dict[str, Any]]]:
     """
     Curated set of searches from simple to advanced.
 
     Default behavior: include_pending=True everywhere to maximize useful results.
     If --certified, we omit include_pending so users see only certified/registered results.
     """
+
     def P(**kw) -> Dict[str, Any]:
         if not certified_only and "include_pending" not in kw:
             kw["include_pending"] = True
@@ -207,22 +217,37 @@ def build_cases(query: str, limit: int, *, certified_only: bool) -> List[Tuple[s
         ("Capabilities filter", P(q=query, capabilities="rag,sql", limit=limit)),
         ("Frameworks filter", P(q=query, frameworks="langchain,autogen", limit=limit)),
         ("Providers filter", P(q=query, providers="openai,anthropic", limit=limit)),
-        ("Combo: type + snippets + hybrid + longer limit",
-         P(q=query, type="mcp_server", with_snippets=True, mode="hybrid", limit=max(limit, 10))),
-        ("Different query term",
-         P(q="vector database", type="tool", capabilities="embedding", limit=limit)),
+        (
+            "Combo: type + snippets + hybrid + longer limit",
+            P(
+                q=query,
+                type="mcp_server",
+                with_snippets=True,
+                mode="hybrid",
+                limit=max(limit, 10),
+            ),
+        ),
+        (
+            "Different query term",
+            P(q="vector database", type="tool", capabilities="embedding", limit=limit),
+        ),
     ]
 
     # Keep one explicit pending case in the list only if --certified is set (for comparison)
     if certified_only:
         cases.insert(
             1,
-            ("(Compare) Include pending entities", dict(q=query, include_pending=True, limit=limit)),
+            (
+                "(Compare) Include pending entities",
+                dict(q=query, include_pending=True, limit=limit),
+            ),
         )
 
     return cases
 
+
 # ---------------------------- Runner ---------------------------- #
+
 
 def run_cases(
     client: MatrixClient,
@@ -259,7 +284,9 @@ def run_cases(
                     continue
                 print(f"  ! search failed after retries: {e}")
                 _print_results([], show_status=show_status)
-                print("  tip: if your catalog isn't ingested yet, try: matrix remotes ingest <remote-name>")
+                print(
+                    "  tip: if your catalog isn't ingested yet, try: matrix remotes ingest <remote-name>"
+                )
                 continue
         else:
             if not json_mode:
@@ -279,14 +306,20 @@ def run_cases(
         else:
             _print_results([], show_status=show_status)
             if not params.get("include_pending"):
-                print("  tip: no certified matches; re-run without --certified to include pending results.")
+                print(
+                    "  tip: no certified matches; re-run without --certified to include pending results."
+                )
             else:
                 print("  tip: try a broader query or increase --limit.")
 
+
 # ---------------------------- Main ---------------------------- #
 
+
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Matrix Hub search cookbook (efficient + friendly)")
+    ap = argparse.ArgumentParser(
+        description="Matrix Hub search cookbook (efficient + friendly)"
+    )
     ap.add_argument(
         "--hub",
         default=os.getenv("MATRIX_HUB_BASE", "https://api.matrixhub.io"),
@@ -299,7 +332,11 @@ def main() -> int:
     )
     ap.add_argument("--query", default="hello", help="Base search query to demonstrate")
     ap.add_argument("--limit", type=int, default=5, help="Default limit for examples")
-    ap.add_argument("--json", action="store_true", help="Print raw JSON payloads for each example (no fallback)")
+    ap.add_argument(
+        "--json",
+        action="store_true",
+        help="Print raw JSON payloads for each example (no fallback)",
+    )
     ap.add_argument(
         "--show-status",
         action="store_true",
@@ -310,9 +347,17 @@ def main() -> int:
         action="store_true",
         help="Show only certified/registered results (filters out pending).",
     )
-    ap.add_argument("--only", default=None, help="Run only cases whose title contains this substring (case-insensitive)")
-    ap.add_argument("--retries", type=int, default=1, help="Retries per example on transient errors")
-    ap.add_argument("--wait", type=float, default=0.4, help="Sleep between retries (seconds)")
+    ap.add_argument(
+        "--only",
+        default=None,
+        help="Run only cases whose title contains this substring (case-insensitive)",
+    )
+    ap.add_argument(
+        "--retries", type=int, default=1, help="Retries per example on transient errors"
+    )
+    ap.add_argument(
+        "--wait", type=float, default=0.4, help="Sleep between retries (seconds)"
+    )
     args = ap.parse_args()
 
     # Never print the token
@@ -321,11 +366,17 @@ def main() -> int:
     print(f"Token: {'<set>' if args.token else '<none>'}")
     print(f"Base query: {args.query!r}, limit={args.limit}")
     if args.certified:
-        print("(filter) showing only certified/registered results; pending are excluded.")
+        print(
+            "(filter) showing only certified/registered results; pending are excluded."
+        )
     else:
-        print("(default) pending results are included; use --certified to filter to registered only.")
+        print(
+            "(default) pending results are included; use --certified to filter to registered only."
+        )
     if args.show_status and not args.json:
-        print("(status) rows will include a small ' (pending)' / ' (certified)' suffix; summary shows pending counts.")
+        print(
+            "(status) rows will include a small ' (pending)' / ' (certified)' suffix; summary shows pending counts."
+        )
 
     client = MatrixClient(base_url=args.hub, token=args.token)
 

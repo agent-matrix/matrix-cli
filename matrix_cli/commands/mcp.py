@@ -5,6 +5,7 @@ import asyncio
 import difflib
 import json
 import os
+from dataclasses import asdict as _dc_asdict, is_dataclass as _dc_is_dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, List
 
@@ -56,6 +57,93 @@ def _jsonify_content_block(block: Any) -> Dict[str, Any]:
         return {"type": str(t or type(block).__name__), "repr": repr(block)}
     except Exception:
         return {"type": str(t or type(block).__name__), "repr": "<unrepr>"}
+
+
+def _to_jsonable(obj: Any, _depth: int = 0) -> Any:
+    """
+    Convert arbitrary SDK objects (Pydantic v1/v2, dataclasses, misc containers) into
+    JSON-serializable primitives. Non-serializable leaves become repr(obj).
+    Depth is bounded to keep it safe and fast.
+    """
+    if obj is None or isinstance(obj, (bool, int, float, str)):
+        return obj
+    if _depth > 6:
+        # Prevent pathological recursion
+        try:
+            return repr(obj)
+        except Exception:
+            return "<unrepr>"
+
+    # Bytes-like → decode best-effort
+    if isinstance(obj, (bytes, bytearray, memoryview)):
+        try:
+            return obj.decode("utf-8", errors="replace")
+        except Exception:
+            return repr(obj)
+
+    # Collections
+    if isinstance(obj, (list, tuple, set, frozenset)):
+        return [_to_jsonable(v, _depth + 1) for v in obj]
+    if isinstance(obj, dict):
+        out: Dict[str, Any] = {}
+        for k, v in obj.items():
+            try:
+                sk = str(k)
+            except Exception:
+                sk = "<key>"
+            out[sk] = _to_jsonable(v, _depth + 1)
+        return out
+
+    # Dataclass
+    try:
+        if _dc_is_dataclass(obj):
+            return _to_jsonable(_dc_asdict(obj), _depth + 1)
+    except Exception:
+        pass
+
+    # Pydantic v2
+    try:
+        md = getattr(obj, "model_dump", None)
+        if callable(md):
+            try:
+                return _to_jsonable(md(mode="json"), _depth + 1)  # v2 preferred
+            except Exception:
+                return _to_jsonable(md(), _depth + 1)
+    except Exception:
+        pass
+
+    # Pydantic v1
+    try:
+        d = getattr(obj, "dict", None)
+        if callable(d):
+            return _to_jsonable(d(), _depth + 1)
+    except Exception:
+        pass
+
+    # Pydantic v2 json
+    try:
+        mdj = getattr(obj, "model_dump_json", None)
+        if callable(mdj):
+            try:
+                return _to_jsonable(json.loads(mdj()), _depth + 1)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # Generic object → __dict__ if simple
+    try:
+        d = getattr(obj, "__dict__", None)
+        if isinstance(d, dict) and d is not obj:
+            return _to_jsonable(d, _depth + 1)
+    except Exception:
+        pass
+
+    # Fallback: repr
+    try:
+        return repr(obj)
+    except Exception:
+        return "<unrepr>"
 
 
 # ------- reuse ps logic: read endpoint from runner.json when possible ----- #
@@ -344,7 +432,8 @@ async def _probe_async(
                     "ok": True,
                     "url": url,
                     "initialized": True,
-                    "init": getattr(init_result, "__dict__", {}),
+                    # ← FIX: make everything JSON-serializable
+                    "init": _to_jsonable(init_result),
                     "tools": [t.name for t in getattr(tools, "tools", [])],
                     "call": None,
                 }
@@ -388,8 +477,10 @@ def _run_probe_and_render(
         raise typer.Exit(130)
 
     if json_out:
-        typer.echo(json.dumps(report, indent=2, sort_keys=True))
-        raise typer.Exit(0 if report.get("ok") else 2)
+        # Ensure robust JSON even if any nested object slipped in
+        safe = _to_jsonable(report)
+        typer.echo(json.dumps(safe, indent=2, sort_keys=True))
+        raise typer.Exit(0 if safe.get("ok") else 2)
 
     if not report.get("ok"):
         typer.echo(f"❌ {report.get('reason', 'probe failed')}", err=True)

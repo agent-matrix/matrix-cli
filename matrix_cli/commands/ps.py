@@ -84,21 +84,46 @@ def _host_for_row(row) -> str:
 
 
 @app.command()
-def main() -> None:
+def main(
+    plain: bool = typer.Option(
+        False,
+        "--plain",
+        help="Print a script-friendly table: <alias> <pid> <port> <uptime> <url> <target>.",
+    ),
+    json_out: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit structured JSON (array of rows).",
+    ),
+) -> None:
+    """
+    Default: pretty Rich table.
+    --plain: whitespace-delimited rows for shell scripts.
+    --json: machine-readable array of objects.
+
+    Columns for --plain:
+      <alias> <pid> <port> <uptime> <url> <target>
+    """
+    if plain and json_out:
+        # Be explicit rather than guessing; keep behavior predictable for scripts
+        typer.echo("Error: use either --plain or --json (not both).", err=True)
+        raise typer.Exit(2)
+
     from matrix_sdk import runtime
 
     rows = runtime.status()
-    table = ps_table()
     now = time.time()
 
+    # Build normalized row dicts once
+    norm_rows = []
     for r in sorted(rows, key=lambda x: x.alias):
-        up = int(now - float(r.started_at))
-        h, rem = divmod(up, 3600)
+        uptime_seconds = max(0, int(now - float(getattr(r, "started_at", 0) or 0)))
+        h, rem = divmod(uptime_seconds, 3600)
         m, s = divmod(rem, 60)
         uptime_str = f"{h:02d}:{m:02d}:{s:02d}"
 
         port = getattr(r, "port", None)
-        target = getattr(r, "target", "")
+        target = getattr(r, "target", "") or ""
         host = _host_for_row(r)
 
         if port:
@@ -107,14 +132,46 @@ def main() -> None:
         else:
             url = "—"
 
+        norm_rows.append(
+            {
+                "alias": getattr(r, "alias", ""),
+                "pid": int(getattr(r, "pid", 0) or 0),
+                "port": int(port) if port else None,
+                "uptime": uptime_str,
+                "uptime_seconds": uptime_seconds,
+                "url": url,
+                "target": target,
+                "host": host,
+            }
+        )
+
+    # JSON mode (no extra noise)
+    if json_out:
+        typer.echo(json.dumps(norm_rows, indent=2, sort_keys=False))
+        raise typer.Exit(0)
+
+    # Plain mode (stable column order for scripts)
+    if plain:
+        for rd in norm_rows:
+            # Keep port as '-' when missing to preserve column positions
+            port_str = "-" if rd["port"] is None else str(rd["port"])
+            # alias pid port uptime url target
+            typer.echo(
+                f"{rd['alias']} {rd['pid']} {port_str} {rd['uptime']} {rd['url']} {rd['target']}"
+            )
+        raise typer.Exit(0)
+
+    # Default: pretty table + count line
+    table = ps_table()
+    for rd in norm_rows:
         table.add_row(
-            r.alias,
-            str(r.pid),
-            str(port or "-"),
-            uptime_str,
-            url,  # <-- NEW: URL column content
-            target,
+            rd["alias"],
+            str(rd["pid"]),
+            str(rd["port"] if rd["port"] is not None else "-"),
+            rd["uptime"],
+            rd["url"],
+            rd["target"],
         )
 
     Console().print(table)
-    info(f"{len(rows)} running process(es).")
+    info(f"{len(norm_rows)} running process(es).")

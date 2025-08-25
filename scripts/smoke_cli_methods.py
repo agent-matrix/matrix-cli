@@ -17,6 +17,7 @@ CHANGELOG
 - 2025-08-16: Expect doctor(fail) to return exit code 1. Link test now tries
   `--as` then falls back to `--alias`, and accepts either “linked” or “added”.
 """
+
 from __future__ import annotations
 
 import sys
@@ -30,6 +31,7 @@ from typer.testing import CliRunner
 # -----------------------------------------------------------------------------
 # 1) Minimal in-memory fake `matrix_sdk` so the CLI can run offline
 # -----------------------------------------------------------------------------
+
 
 def install_fake_sdk() -> None:
     sdk = types.ModuleType("matrix_sdk")
@@ -89,7 +91,14 @@ def install_fake_sdk() -> None:
         def __init__(self, client) -> None:
             self.client = client
 
-        def build(self, id: str, *, target: str | None = None, alias: str | None = None, timeout: int = 900):
+        def build(
+            self,
+            id: str,
+            *,
+            target: str | None = None,
+            alias: str | None = None,
+            timeout: int = 900,
+        ):
             installer_mod.build_calls.append((id, target, alias))
             return {"id": id, "target": target, "alias": alias}
 
@@ -105,12 +114,16 @@ def install_fake_sdk() -> None:
             super().__init__(f"HTTP {status}: {detail}")
 
     class MatrixClient:
-        def __init__(self, base_url: str, token: str | None = None, timeout: float = 15.0) -> None:
+        def __init__(
+            self, base_url: str, token: str | None = None, timeout: float = 15.0
+        ) -> None:
             self.base_url = base_url
             self.token = token
 
         def search(self, q: str, **kwargs):
-            return {"items": [{"id": "mcp_server:test@1.0.0", "summary": "Hello from SDK"}]}
+            return {
+                "items": [{"id": "mcp_server:test@1.0.0", "summary": "Hello from SDK"}]
+            }
 
         def entity(self, id: str):
             return {"id": id, "name": "demo"}
@@ -140,6 +153,7 @@ def install_fake_sdk() -> None:
 
     def parse(url: str) -> DeepLink:
         from urllib.parse import urlsplit, parse_qs, unquote
+
         u = urlsplit(url)
         qs = parse_qs(u.query)
         raw_id = (qs.get("id") or [None])[0]
@@ -165,7 +179,9 @@ def install_fake_sdk() -> None:
     def start(target: str, *, alias: str | None = None, port: int | None = None):
         pid = 12000 + len(_state)
         prt = port or 7777
-        lock = SimpleNamespace(pid=pid, port=prt, alias=alias or "anon", target=target, started_at=0)
+        lock = SimpleNamespace(
+            pid=pid, port=prt, alias=alias or "anon", target=target, started_at=0
+        )
         _state[lock.alias] = lock
         return lock
 
@@ -209,6 +225,7 @@ def install_fake_sdk() -> None:
 # 2) Helpers
 # -----------------------------------------------------------------------------
 
+
 def out_of(result) -> str:
     # Support both Click 7 (result.output) and Click 8+ (result.stdout)
     return getattr(result, "stdout", getattr(result, "output", ""))
@@ -230,7 +247,7 @@ def must_ok(
     - If *contains_all* is provided, text must include all.
     """
     text = out_of(result)
-    ok = (result.exit_code == expect_exit)
+    ok = result.exit_code == expect_exit
 
     def has(s: str) -> bool:
         return s.lower() in text.lower()
@@ -251,9 +268,13 @@ def must_ok(
 # 3) Individual command tests (each independent)
 # -----------------------------------------------------------------------------
 
+
 def t_install(runner: CliRunner) -> bool:
     from matrix_cli.__main__ import app
-    res = runner.invoke(app, ["install", "mcp_server:hello@1.0.0", "--alias", "hello", "--force"])
+
+    res = runner.invoke(
+        app, ["install", "mcp_server:hello@1.0.0", "--alias", "hello", "--force"]
+    )
     return must_ok(
         "install",
         res,
@@ -263,16 +284,22 @@ def t_install(runner: CliRunner) -> bool:
 
 def t_run(runner: CliRunner) -> bool:
     from matrix_cli.__main__ import app
+
     # prepare alias
-    sys.modules["matrix_sdk.alias"].AliasStore().set("svc", id="mcp_server:svc@1.0.0", target="/tmp/matrix/svc")
+    sys.modules["matrix_sdk.alias"].AliasStore().set(
+        "svc", id="mcp_server:svc@1.0.0", target="/tmp/matrix/svc"
+    )
     res = runner.invoke(app, ["run", "svc"])
     return must_ok("run", res, contains_all=["Started", "svc"])
 
 
 def t_ps(runner: CliRunner) -> bool:
     from matrix_cli.__main__ import app
+
     # ensure one running
-    sys.modules["matrix_sdk.alias"].AliasStore().set("ps1", id="mcp_server:ps@1.0.0", target="/tmp/matrix/ps1")
+    sys.modules["matrix_sdk.alias"].AliasStore().set(
+        "ps1", id="mcp_server:ps@1.0.0", target="/tmp/matrix/ps1"
+    )
     runner.invoke(app, ["run", "ps1"])  # ignore result
     res = runner.invoke(app, ["ps"])
     return must_ok("ps", res, contains="running")
@@ -280,7 +307,10 @@ def t_ps(runner: CliRunner) -> bool:
 
 def t_logs_lines(runner: CliRunner) -> bool:
     from matrix_cli.__main__ import app
-    sys.modules["matrix_sdk.alias"].AliasStore().set("logs1", id="mcp_server:logs@1.0.0", target="/tmp/matrix/logs1")
+
+    sys.modules["matrix_sdk.alias"].AliasStore().set(
+        "logs1", id="mcp_server:logs@1.0.0", target="/tmp/matrix/logs1"
+    )
     runner.invoke(app, ["run", "logs1"])  # start
     res = runner.invoke(app, ["logs", "logs1", "--lines", "2"])
     # Non-follow path likely tails a file; our fake runtime doesn't write one.
@@ -290,7 +320,10 @@ def t_logs_lines(runner: CliRunner) -> bool:
 
 def t_logs_follow(runner: CliRunner) -> bool:
     from matrix_cli.__main__ import app
-    sys.modules["matrix_sdk.alias"].AliasStore().set("logs2", id="mcp_server:logs@1.0.0", target="/tmp/matrix/logs2")
+
+    sys.modules["matrix_sdk.alias"].AliasStore().set(
+        "logs2", id="mcp_server:logs@1.0.0", target="/tmp/matrix/logs2"
+    )
     runner.invoke(app, ["run", "logs2"])  # start
     res = runner.invoke(app, ["logs", "logs2", "--follow"])
     return must_ok("logs (follow)", res, contains="follow line")
@@ -298,7 +331,10 @@ def t_logs_follow(runner: CliRunner) -> bool:
 
 def t_doctor_ok(runner: CliRunner) -> bool:
     from matrix_cli.__main__ import app
-    sys.modules["matrix_sdk.alias"].AliasStore().set("doc1", id="mcp_server:doc@1.0.0", target="/tmp/matrix/doc1")
+
+    sys.modules["matrix_sdk.alias"].AliasStore().set(
+        "doc1", id="mcp_server:doc@1.0.0", target="/tmp/matrix/doc1"
+    )
     runner.invoke(app, ["run", "doc1"])  # start
     res = runner.invoke(app, ["doctor", "doc1"])
     return must_ok("doctor (ok)", res, contains_any=["ok", "/health"])  # case-insens
@@ -306,18 +342,24 @@ def t_doctor_ok(runner: CliRunner) -> bool:
 
 def t_stop_and_doctor_fail(runner: CliRunner) -> bool:
     from matrix_cli.__main__ import app
-    sys.modules["matrix_sdk.alias"].AliasStore().set("doc2", id="mcp_server:doc@1.0.0", target="/tmp/matrix/doc2")
+
+    sys.modules["matrix_sdk.alias"].AliasStore().set(
+        "doc2", id="mcp_server:doc@1.0.0", target="/tmp/matrix/doc2"
+    )
     runner.invoke(app, ["run", "doc2"])  # start
     r_stop = runner.invoke(app, ["stop", "doc2"])
     ok1 = must_ok("stop", r_stop, contains_all=["stopped", "doc2"])  # case-insens
     r_doc = runner.invoke(app, ["doctor", "doc2"])
     # Expect non-zero exit when doctor reports failure in your CLI
-    ok2 = must_ok("doctor (fail)", r_doc, expect_exit=1, contains_any=["status: fail", "fail"])  # case-insens
+    ok2 = must_ok(
+        "doctor (fail)", r_doc, expect_exit=1, contains_any=["status: fail", "fail"]
+    )  # case-insens
     return ok1 and ok2
 
 
 def t_alias_crud(runner: CliRunner) -> bool:
     from matrix_cli.__main__ import app
+
     ok = True
     r_add = runner.invoke(app, ["alias", "add", "a1", "id1", "/tmp/t1"])
     ok &= must_ok("alias add", r_add)
@@ -336,40 +378,47 @@ def t_alias_crud(runner: CliRunner) -> bool:
 def t_link(runner: CliRunner) -> bool:
     """Tests the `link` command."""
     from matrix_cli.__main__ import app
-    
+
     # Create a temporary directory to simulate a local project
     with tempfile.TemporaryDirectory() as d:
         p = Path(d)
-        
+
         # The `link` command requires a runner.json file to exist
         (p / "runner.json").write_text("{}", encoding="utf-8")
-        
+
         # Invoke the command with the correct, unambiguous option
         res = runner.invoke(app, ["link", str(p), "--as", "link1"])
-        
+
         # Check for a successful exit code and a success message
         return must_ok("link", res, contains_any=["linked", "added"])
 
 
 def t_search(runner: CliRunner) -> bool:
     from matrix_cli.__main__ import app
+
     res = runner.invoke(app, ["search", "hello", "--limit", "3"])
-    return must_ok("search", res, contains_any=["result(s)", "results"])  # tolerate CLI wording
+    return must_ok(
+        "search", res, contains_any=["result(s)", "results"]
+    )  # tolerate CLI wording
 
 
 def t_show(runner: CliRunner) -> bool:
     from matrix_cli.__main__ import app
+
     res = runner.invoke(app, ["show", "mcp_server:test@1.0.0"])
     return must_ok("show", res, contains='"id": "mcp_server:test@1.0.0"')
 
 
 def t_remotes(runner: CliRunner) -> bool:
     from matrix_cli.__main__ import app
+
     ok = True
     r_list = runner.invoke(app, ["remotes", "list"])
     ok &= must_ok("remotes list", r_list)
 
-    r_add = runner.invoke(app, ["remotes", "add", "https://example.com/cat.json", "--name", "example"])
+    r_add = runner.invoke(
+        app, ["remotes", "add", "https://example.com/cat.json", "--name", "example"]
+    )
     ok &= must_ok("remotes add", r_add, contains="added")
 
     r_ing = runner.invoke(app, ["remotes", "ingest", "example"])
@@ -383,6 +432,7 @@ def t_remotes(runner: CliRunner) -> bool:
 def t_handle_url_install(runner: CliRunner) -> bool:
     from matrix_cli.__main__ import app
     from urllib.parse import quote
+
     uid = "mcp_server:hello-sse@1.0.0"
     alias = "hello-sse"
     url = f"matrix://install?id={quote(uid)}&alias={alias}"
@@ -393,6 +443,7 @@ def t_handle_url_install(runner: CliRunner) -> bool:
 # -----------------------------------------------------------------------------
 # 4) Main
 # -----------------------------------------------------------------------------
+
 
 def main() -> int:
     # Install the in-memory SDK before importing the CLI app

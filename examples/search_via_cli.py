@@ -87,21 +87,18 @@ def run_cli_search(query: str) -> Dict[str, Any]:
       - with_snippets=True
       - include_pending=True (default behavior of the CLI unless --certified)
     """
-    cmd = (
-        _matrix_cmd()
-        + [
-            "search",
-            query,
-            "--type",
-            "any",
-            "--mode",
-            "hybrid",
-            "--limit",
-            "5",
-            "--with-snippets",
-            "--json",
-        ]
-    )
+    cmd = _matrix_cmd() + [
+        "search",
+        query,
+        "--type",
+        "any",
+        "--mode",
+        "hybrid",
+        "--limit",
+        "5",
+        "--with-snippets",
+        "--json",
+    ]
 
     # Inherit environment so MATRIX_HUB_BASE / MATRIX_HUB_TOKEN still work.
     env = os.environ.copy()
@@ -110,7 +107,7 @@ def run_cli_search(query: str) -> Dict[str, Any]:
         p = subprocess.run(
             cmd,
             env=env,
-            check=False,              # we'll handle non-zero ourselves
+            check=False,  # we'll handle non-zero ourselves
             text=True,
             capture_output=True,
         )

@@ -43,6 +43,7 @@ from .commands import (
     # command groups
     connection as cmd_connection,
     mcp as cmd_mcp,
+    uninstall as cmd_uninstall,
 )
 
 app = typer.Typer(
@@ -60,6 +61,7 @@ app.command("stop")(cmd_stop.main)
 app.command("doctor")(cmd_doctor.main)
 app.command("search")(cmd_search.main)
 app.command("show")(cmd_show.main)
+app.command("uninstall")(cmd_uninstall.main)
 
 # Command groups (sub-commands)
 app.add_typer(cmd_alias.app, name="alias", help="Manage local component aliases.")
