@@ -30,6 +30,7 @@ dependencies = [
   "rich>=13.7",
   "matrix-python-sdk>=0.1.5",
   "httpx>=0.28,<0.29",
+  "requests>=2.32" 
 ]
 
 [project.urls]
