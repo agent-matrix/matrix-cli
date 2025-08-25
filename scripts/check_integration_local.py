@@ -7,7 +7,7 @@ Matrix CLI — Standalone Integration Test
   `python your_script_name.py`
 
 Prerequisites:
-  - A local MatrixHub server must be running at http://localhost:7300.
+  - A local MatrixHub server must be running at http://localhost:443.
   - The server must have a component available for search (e.g., 'hello').
 
 Exit code is 0 if all checks pass, non-zero otherwise.
@@ -70,7 +70,7 @@ def main() -> int:
         try:
             # 1. --- SETUP ---
             # Redirect the CLI to the local server and a temporary home directory.
-            os.environ["MATRIX_HUB_BASE"] = "http://localhost:7300"
+            os.environ["MATRIX_HUB_BASE"] = "http://localhost:443"
             os.environ["MATRIX_HOME"] = temp_dir
             print("--- Starting Integration Test Lifecycle ---")
             print(f"HUB_BASE set to: {os.environ['MATRIX_HUB_BASE']}")

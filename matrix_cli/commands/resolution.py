@@ -5,7 +5,7 @@ import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 # We intentionally avoid importing non-stdlib packages here.
 
@@ -14,9 +14,11 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 # Public API
 # ===============================
 
+
 @dataclass
 class ResolutionResult:
     """Outcome of a name→fqid resolution."""
+
     fqid: str
     source_hub: str
     used_local_fallback: bool = False
@@ -104,7 +106,7 @@ def resolve_fqid(
                 try:
                     items = _search_untyped(local_cli, norm_name, limit)
                     used_local = True
-                    note = "(offline) public hub unreachable; used local dev hub at http://localhost:7300"
+                    note = "(offline) public hub unreachable; used local dev hub at http://localhost:443"
                 except Exception:
                     raise
             else:
@@ -159,9 +161,9 @@ def resolve_fqid(
 
     return ResolutionResult(
         fqid=fqid,
-        source_hub=("http://localhost:7300" if used_local else str(cfg.hub_base)),
+        source_hub=("http://localhost:443" if used_local else str(cfg.hub_base)),
         used_local_fallback=used_local,
-        broadened=False, # This logic is now part of the main search.
+        broadened=False,  # This logic is now part of the main search.
         explanation=expl,
         note=note,
     )
@@ -170,6 +172,7 @@ def resolve_fqid(
 # ===============================
 # Helpers (no external deps)
 # ===============================
+
 
 def _is_fqid(s: str) -> bool:
     """Fully-qualified id looks like 'ns:name@version'."""
@@ -262,7 +265,9 @@ def _to_dict(obj: Any) -> Dict[str, Any]:
     return {}
 
 
-def _parse_id_fields(item: Dict[str, Any]) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
+def _parse_id_fields(
+    item: Dict[str, Any],
+) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
     """
     Extract (ns, name, version, type) from a search item.
     Prefer item['id']; fallback to 'type','name','version'.
@@ -276,7 +281,7 @@ def _parse_id_fields(item: Dict[str, Any]) -> Tuple[Optional[str], Optional[str]
     # fallback fields
     ns2 = _normalize_slug(item.get("namespace") or None)
     name2 = _normalize_slug(item.get("name") or None)
-    ver2 = (item.get("version") or None)
+    ver2 = item.get("version") or None
     return ns2, name2, ver2, (typ or None)
 
 
@@ -289,6 +294,7 @@ def _version_key(s: str) -> Any:
     try:
         # Optional import. If unavailable, the fallback below is used.
         from packaging.version import Version  # type: ignore
+
         return Version(s)
     except Exception:
         parts: List[Any] = []
@@ -313,6 +319,7 @@ def _is_prerelease(vkey: Any) -> bool:
     """Detect pre-release when using packaging.Version; else False."""
     try:
         from packaging.version import Version  # type: ignore
+
         if isinstance(vkey, Version):
             return bool(vkey.is_prerelease)
         return Version(str(vkey)).is_prerelease
@@ -346,7 +353,7 @@ def _get_all_sorted_candidates(
             continue
         if want_ver and ver_i and ver_i != want_ver:
             continue
-        
+
         # MODIFIED: Use a tuple to hold the item and its key to avoid mutation
         vkey = _version_key(ver_i or "0.0.0")
         if not allow_prerelease and _is_prerelease(vkey):
@@ -355,7 +362,7 @@ def _get_all_sorted_candidates(
         candidates.append((it, vkey))
 
     # MODIFIED: Apply sorts in reverse order of priority for a correct stable sort
-    
+
     # 1. Sort by Version (descending)
     candidates.sort(key=lambda x: x[1], reverse=True)
 
@@ -371,12 +378,14 @@ def _get_all_sorted_candidates(
         return 0 if is_preferred else 1
 
     candidates.sort(key=type_priority_key)
-    
+
     # Return just the dictionary items, now correctly sorted
     return [item[0] for item in candidates]
 
 
-def _compose_fqid(item: Dict[str, Any], *, default_ns: Optional[str], forced_ver: Optional[str]) -> str:
+def _compose_fqid(
+    item: Dict[str, Any], *, default_ns: Optional[str], forced_ver: Optional[str]
+) -> str:
     iid = item.get("id")
     if isinstance(iid, str) and ":" in iid and "@" in iid:
         return iid
@@ -408,7 +417,9 @@ def _explain_resolution(
     if not _is_fqid(raw_id):
         # MODIFIED: More accurate explanation text
         ns_note = want_ns or prefer_ns or "mcp_server"
-        bits.append(f"Resolved shorthand '{raw_id}' → '{fqid}' (ranking preference: {ns_note}).")
+        bits.append(
+            f"Resolved shorthand '{raw_id}' → '{fqid}' (ranking preference: {ns_note})."
+        )
     else:
         bits.append(f"Using '{fqid}'.")
     # Broadened is no longer used, but kept for compatibility if needed.
@@ -423,6 +434,7 @@ def _looks_like_public_hub(hub_base: str) -> bool:
     # Keep it lightweight: treat api.matrixhub.io as public.
     try:
         from urllib.parse import urlparse
+
         host = (urlparse(hub_base).hostname or "").lower()
         return host == "api.matrixhub.io"
     except Exception:
@@ -459,8 +471,11 @@ def _is_dns_or_conn_failure(err: Exception) -> bool:
 def _try_local_client(cfg):
     """Best-effort to create a local hub client without hard-coding SDK imports at module import time."""
     try:
-        from matrix_sdk.client import MatrixClient as _MC  # local import to avoid mandatory dep at import time
-        return _MC(base_url="http://localhost:7300", token=cfg.token)
+        from matrix_sdk.client import (
+            MatrixClient as _MC,
+        )  # local import to avoid mandatory dep at import time
+
+        return _MC(base_url="http://localhost:443", token=cfg.token)
     except Exception:
         return None
 
@@ -468,6 +483,7 @@ def _try_local_client(cfg):
 # ===============================
 # Tiny on-disk cache
 # ===============================
+
 
 class _ResolverCache:
     """

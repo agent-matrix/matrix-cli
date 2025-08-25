@@ -1,4 +1,3 @@
-
 # matrix_cli/__main__.py
 from __future__ import annotations
 import sys
@@ -9,6 +8,7 @@ import typer
 if len(sys.argv) == 2 and sys.argv[1] in {"--version", "-V"}:
     try:
         from importlib.metadata import version as _v
+
         print(_v("matrix-cli"))
     except Exception:
         print("0+unknown")
@@ -18,6 +18,7 @@ if len(sys.argv) == 2 and sys.argv[1] in {"--version", "-V"}:
 if len(sys.argv) > 1 and sys.argv[1] == "version":
     try:
         from matrix_cli.commands.version import app as version_app
+
         version_app(args=sys.argv[2:], prog_name="matrix version")
     except Exception as e:
         print(f"Error loading version command: {e}", file=sys.stderr)
@@ -39,6 +40,9 @@ from .commands import (
     show as cmd_show,
     stop as cmd_stop,
     version as cmd_version,
+    # command groups
+    connection as cmd_connection,
+    mcp as cmd_mcp,
 )
 
 app = typer.Typer(
@@ -62,6 +66,16 @@ app.add_typer(cmd_alias.app, name="alias", help="Manage local component aliases.
 app.add_typer(cmd_link.app, name="link", help="Link a local folder as an alias.")
 app.add_typer(cmd_remotes.app, name="remotes", help="Manage Hub remote catalogs.")
 app.add_typer(cmd_version.app, name="version", help="Show CLI and SDK versions.")
+app.add_typer(
+    cmd_connection.app,
+    name="connection",
+    help="Check connectivity and health of the Matrix Hub.",
+)
+app.add_typer(
+    cmd_mcp.app,
+    name="mcp",
+    help="MCP utilities (probe an MCP server).",
+)
 
 # Hidden internal commands
 app.add_typer(
@@ -71,9 +85,11 @@ app.add_typer(
     hidden=True,
 )
 
+
 def main() -> None:
     """The main entry point for the CLI application."""
     app()
+
 
 if __name__ == "__main__":
     main()

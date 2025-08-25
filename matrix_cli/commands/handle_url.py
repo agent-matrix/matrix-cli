@@ -7,6 +7,7 @@ from ..util.console import success, error, info
 
 app = typer.Typer(help="Handle matrix:// deep links (install)")
 
+
 @app.command("install")
 def main(url: str = typer.Argument(..., help="Full matrix:// URL from the OS")):
     """

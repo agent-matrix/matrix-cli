@@ -14,7 +14,7 @@ Key behavior
 
 Usage:
   python scripts/demo_search.py
-  python scripts/demo_search.py --hub http://localhost:7300
+  python scripts/demo_search.py --hub http://localhost:443
   python scripts/demo_search.py --query "hello" --limit 5 --json
   python scripts/demo_search.py --only "snippets"   # run only cases whose titles match
 

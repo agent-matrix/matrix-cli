@@ -158,7 +158,7 @@ def _retry_call(fn, *, retries: int, wait: float):
     while True:
         try:
             return fn()
-        except Exception as e:
+        except Exception:
             attempt += 1
             if attempt > max(0, retries):
                 raise
@@ -207,6 +207,7 @@ def _stable_prioritize(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     2) Then others
     3) Within each group, if score_final is present, sort descending; otherwise keep input order
     """
+
     def _key(it: Dict[str, Any]) -> Tuple[int, float]:
         tid = str(it.get("id", ""))
         typ = str(it.get("type", "")).lower()
@@ -226,26 +227,18 @@ def _stable_prioritize(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 # --------------------------------------------------------------------------------------
 @app.command()
 def main(
-    query: str = typer.Argument(
-        ..., help="Search query (or an exact id with --exact)"
-    ),
+    query: str = typer.Argument(..., help="Search query (or an exact id with --exact)"),
     type: str | None = typer.Option(  # noqa: A002
         "any", "--type", help="Filter by entity type (agent|tool|mcp_server|any)"
     ),
     limit: int = typer.Option(5, "--limit", "-l", help="Max number of results"),
     retries: int = typer.Option(2, "--retries", help="Retry on temporary errors"),
-    wait: float = typer.Option(
-        0.5, "--wait", help="Seconds to wait between retries"
-    ),
+    wait: float = typer.Option(0.5, "--wait", help="Seconds to wait between retries"),
     capabilities: str | None = typer.Option(
         None, "--capabilities", "-c", help="CSV list, e.g. 'rag,sql'"
     ),
-    frameworks: str | None = typer.Option(
-        None, "--frameworks", "-f", help="CSV list"
-    ),
-    providers: str | None = typer.Option(
-        None, "--providers", "-p", help="CSV list"
-    ),
+    frameworks: str | None = typer.Option(None, "--frameworks", "-f", help="CSV list"),
+    providers: str | None = typer.Option(None, "--providers", "-p", help="CSV list"),
     with_snippets: bool = typer.Option(
         False, "--with-snippets", help="Server may return short snippets"
     ),
@@ -253,7 +246,10 @@ def main(
         None, "--mode", "-m", help="keyword|semantic|hybrid (server default if omitted)"
     ),
     exact: bool = typer.Option(
-        False, "--exact", "-x", help="Treat QUERY as an exact id and fetch via entity lookup."
+        False,
+        "--exact",
+        "-x",
+        help="Treat QUERY as an exact id and fetch via entity lookup.",
     ),
     certified: bool = typer.Option(
         False,
@@ -278,7 +274,7 @@ def main(
 
     Resilient UX, minimal traffic:
       • If the public hub cannot be resolved/reached (e.g., offline dev box),
-        we try ONCE against http://localhost:7300 with include_pending=True (human mode only).
+        we try ONCE against http://localhost:443 with include_pending=True (human mode only).
       • Output presentation prioritizes mcp_server results (no extra queries).
       • If results exist, show a one-line install hint for the top mcp_server item.
     """
@@ -292,11 +288,14 @@ def main(
 
     # Fast path: treat input as exact id
     if exact or _looks_like_id(query):
+
         def _entity_call(c):
             return c.entity(query)
 
         try:
-            payload = _retry_call(lambda: _entity_call(client), retries=retries, wait=wait)
+            payload = _retry_call(
+                lambda: _entity_call(client), retries=retries, wait=wait
+            )
             if json_out:
                 typer.echo(json.dumps(_to_dict(payload), indent=2))
                 return
@@ -315,7 +314,8 @@ def main(
             if (not json_out) and hub_is_public and _is_dns_or_conn_failure(e):
                 try:
                     from matrix_sdk.client import MatrixClient as _MC
-                    local_client = _MC(base_url="http://localhost:7300", token=cfg.token)
+
+                    local_client = _MC(base_url="http://localhost:443", token=cfg.token)
                     payload = _entity_call(local_client)
                     ed = _to_dict(payload)
                     print(_row_text(ed, show_status=show_status))
@@ -324,7 +324,9 @@ def main(
                         info(f"1 result ({pend} pending).")
                     else:
                         info("1 result.")
-                    warn("(offline?) couldn't reach public hub; used local dev hub at http://localhost:7300")
+                    warn(
+                        "(offline?) couldn't reach public hub; used local dev hub at http://localhost:443"
+                    )
                     return
                 except Exception:
                     pass  # fall through to graceful message
@@ -387,9 +389,12 @@ def main(
         if (not json_out) and hub_is_public and _is_dns_or_conn_failure(e):
             try:
                 from matrix_sdk.client import MatrixClient as _MC
-                local_client = _MC(base_url="http://localhost:7300", token=cfg.token)
+
+                local_client = _MC(base_url="http://localhost:443", token=cfg.token)
                 local_params = dict(params)
-                local_params["include_pending"] = True  # ensure users see something locally
+                local_params["include_pending"] = (
+                    True  # ensure users see something locally
+                )
                 payload = local_client.search(**local_params)
                 items = _stable_prioritize(_to_items(payload))
                 pending_count = _print_items(items, show_status=show_status)
@@ -397,7 +402,9 @@ def main(
                     info(f"{len(items)} results ({pending_count} pending).")
                 else:
                     info(f"{len(items)} results.")
-                warn("(offline?) couldn't reach public hub; used local dev hub at http://localhost:7300")
+                warn(
+                    "(offline?) couldn't reach public hub; used local dev hub at http://localhost:443"
+                )
 
                 # UX install hint for local fallback as well
                 if items:
@@ -416,5 +423,7 @@ def main(
             raise typer.Exit(1)
         warn(f"search failed: {e}")
         info("0 results.")
-        warn("Tip: try a broader query or run: matrix remotes ingest <remote-name> if your catalog is empty.")
+        warn(
+            "Tip: try a broader query or run: matrix remotes ingest <remote-name> if your catalog is empty."
+        )
         return

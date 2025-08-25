@@ -16,6 +16,7 @@ def __getattr__(name: str) -> Any:
     if name == "__version__":
         try:
             from importlib.metadata import version
+
             # The version is retrieved from package metadata only when requested
             return version("matrix-cli")
         except Exception:

@@ -12,14 +12,16 @@ def test_search_and_show(runner):
 
     r1 = runner.invoke(app, ["show", "mcp_server:test@1.0.0"])
     assert r1.exit_code == 0
-    assert "\"id\": \"mcp_server:test@1.0.0\"" in r1.stdout
+    assert '"id": "mcp_server:test@1.0.0"' in r1.stdout
 
 
 def test_remotes_roundtrip(runner):
     r_list = runner.invoke(app, ["remotes", "list"])
     assert r_list.exit_code == 0
 
-    r_add = runner.invoke(app, ["remotes", "add", "https://example.com/cat.json", "--name", "example"])
+    r_add = runner.invoke(
+        app, ["remotes", "add", "https://example.com/cat.json", "--name", "example"]
+    )
     assert r_add.exit_code == 0
     assert "added" in r_add.stdout
 

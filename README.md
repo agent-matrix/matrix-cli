@@ -62,7 +62,7 @@ Matrix CLI reads (in order of precedence):
 ### Environment variables
 
 ```bash
-export MATRIX_HUB_BASE=https://api.matrixhub.io   # or http://localhost:7300
+export MATRIX_HUB_BASE=https://api.matrixhub.io   # or http://localhost:443
 export MATRIX_HUB_TOKEN=...                       # optional
 export MATRIX_HOME=~/.matrix                      # optional; default is ~/.matrix
 ```
@@ -70,7 +70,7 @@ export MATRIX_HOME=~/.matrix                      # optional; default is ~/.matr
 ### Optional TOML (`~/.config/matrix/cli.toml`)
 
 ```toml
-hub_base = "https://api.matrixhub.io"  # or "http://localhost:7300"
+hub_base = "https://api.matrixhub.io"  # or "http://localhost:443"
 token = ""                             # optional
 home = "~/.matrix"                     # optional
 ```
@@ -150,7 +150,7 @@ matrix search "vector" --mode hybrid --with-snippets
 matrix search "sql agent" --capabilities rag,sql --json
 ```
 
-If the public hub is unreachable, the CLI will try your local dev hub at `http://localhost:7300` once and let you know.
+If the public hub is unreachable, the CLI will try your local dev hub at `http://localhost:443` once and let you know.
 
 ---
 
@@ -160,7 +160,7 @@ If the public hub is unreachable, the CLI will try your local dev hub at `http:/
 * If `ns` is missing, **prefers `mcp_server`** candidates.
 * If `@version` is missing, picks **latest** (stable > pre-release, then highest).
 * Uses a tiny, short-lived cache under `~/.matrix/cache/resolve.json` per hub.
-* On DNS/connection failures to the public hub, tries `http://localhost:7300` once.
+* On DNS/connection failures to the public hub, tries `http://localhost:443` once.
 
 ---
 
@@ -193,7 +193,7 @@ matrix remotes remove official
 * **No results?** Try `--certified` (if you only want registered) or omit it to include pending.
   If your catalog isn’t ingested yet:
   `matrix remotes ingest <remote-name>`
-* **Offline?** The CLI will attempt a one-time fallback to `http://localhost:7300` where applicable.
+* **Offline?** The CLI will attempt a one-time fallback to `http://localhost:443` where applicable.
 * **Install by name fails?** Try a more specific query in `matrix search`, then install using the fully qualified ID.
 
 ---

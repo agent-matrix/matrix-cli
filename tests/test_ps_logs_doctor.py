@@ -5,7 +5,9 @@ from matrix_cli.__main__ import app
 
 def test_ps_logs_doctor_ok_flow(runner, fake_sdk, mocker):
     # prepare alias and run
-    fake_sdk["alias"].AliasStore().set("svc", id="mcp_server:svc@1.0.0", target="/tmp/matrix/svc")
+    fake_sdk["alias"].AliasStore().set(
+        "svc", id="mcp_server:svc@1.0.0", target="/tmp/matrix/svc"
+    )
 
     r0 = runner.invoke(app, ["run", "svc"])
     assert r0.exit_code == 0, r0.stdout
@@ -33,7 +35,9 @@ def test_ps_logs_doctor_ok_flow(runner, fake_sdk, mocker):
     r3 = runner.invoke(app, ["logs", "svc", "--follow"])
     assert r3.exit_code == 0
     assert "follow line" in r3.stdout
-    mock_tail_logs.assert_called_with("svc", follow=True, n=40) # 40 is the default line count
+    mock_tail_logs.assert_called_with(
+        "svc", follow=True, n=40
+    )  # 40 is the default line count
 
     # doctor
     r4 = runner.invoke(app, ["doctor", "svc"])
@@ -51,4 +55,3 @@ def test_ps_logs_doctor_ok_flow(runner, fake_sdk, mocker):
     assert r6.exit_code == 1
     # --- FIX: Make assertion case-insensitive and less brittle ---
     assert "fail" in r6.stdout.lower()
-

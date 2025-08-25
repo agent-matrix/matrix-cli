@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
 import sys
@@ -15,10 +15,13 @@ from typer.testing import CliRunner
 def _click_stdout_shim(monkeypatch):
     try:
         from click.testing import Result  # type: ignore
+
         # If Click < 8, Result may not expose `.stdout`.
         if not hasattr(Result, "stdout"):
+
             def _get_stdout(self):  # noqa: ANN001
                 return self.output
+
             try:
                 # Add a read-only property alias
                 Result.stdout = property(_get_stdout)  # type: ignore[attr-defined]
@@ -98,7 +101,14 @@ def fake_sdk(monkeypatch):
         def __init__(self, client) -> None:
             self.client = client
 
-        def build(self, id: str, *, target: str | None = None, alias: str | None = None, timeout: int = 900):
+        def build(
+            self,
+            id: str,
+            *,
+            target: str | None = None,
+            alias: str | None = None,
+            timeout: int = 900,
+        ):
             installer_mod.build_calls.append((id, target, alias))
             return {"id": id, "target": target, "alias": alias}
 
@@ -118,13 +128,17 @@ def fake_sdk(monkeypatch):
             super().__init__(f"HTTP {status}: {detail}")
 
     class MatrixClient:
-        def __init__(self, base_url: str, token: str | None = None, timeout: float = 15.0) -> None:
+        def __init__(
+            self, base_url: str, token: str | None = None, timeout: float = 15.0
+        ) -> None:
             self.base_url = base_url
             self.token = token
 
         # Search returns one dummy item for simplicity
         def search(self, q: str, **kwargs):
-            return {"items": [{"id": "mcp_server:test@1.0.0", "summary": "Hello from SDK"}]}
+            return {
+                "items": [{"id": "mcp_server:test@1.0.0", "summary": "Hello from SDK"}]
+            }
 
         def entity(self, id: str):
             return {"id": id, "name": "demo"}
@@ -181,7 +195,9 @@ def fake_sdk(monkeypatch):
     def start(target: str, *, alias: str | None = None, port: int | None = None):
         pid = 12000 + len(_state)
         prt = port or 7777
-        lock = SimpleNamespace(pid=pid, port=prt, alias=alias or "anon", target=target, started_at=0)
+        lock = SimpleNamespace(
+            pid=pid, port=prt, alias=alias or "anon", target=target, started_at=0
+        )
         _state[lock.alias] = lock
         return lock
 

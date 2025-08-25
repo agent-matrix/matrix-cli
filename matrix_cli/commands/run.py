@@ -4,7 +4,9 @@ import typer
 
 from ..util.console import success, error, info
 
-app = typer.Typer(help="Run a server from an alias", add_completion=False, no_args_is_help=False)
+app = typer.Typer(
+    help="Run a server from an alias", add_completion=False, no_args_is_help=False
+)
 
 
 @app.command()

@@ -1,0 +1,1 @@
+python examples/search_via_cli.py

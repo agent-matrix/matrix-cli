@@ -36,7 +36,9 @@ def _dist_version(dist_name: str) -> str:
         return "unknown"
 
 
-@app.command(name="main", help="Show CLI and SDK versions") # Use explicit name to avoid conflicts
+@app.command(
+    name="main", help="Show CLI and SDK versions"
+)  # Use explicit name to avoid conflicts
 def main(
     json_: bool = typer.Option(
         False, "--json", "-j", help="Output machine-readable JSON."
@@ -55,7 +57,7 @@ def main(
     cli_ver = _dist_version(CLI_DIST)
     if cli_ver in ("unknown", "not installed"):
         # Check if the package is already in memory to avoid import cost
-        if (pkg := sys.modules.get("matrix_cli")):
+        if pkg := sys.modules.get("matrix_cli"):
             cli_ver = getattr(pkg, "__version__", cli_ver)
 
     if short:
@@ -65,7 +67,7 @@ def main(
     # Get SDK version: Prefer metadata to avoid importing the full SDK.
     sdk_ver = _dist_version(SDK_DIST)
     if sdk_ver in ("unknown", "not installed"):
-        if (mod := sys.modules.get("matrix_sdk")):
+        if mod := sys.modules.get("matrix_sdk"):
             sdk_ver = getattr(mod, "__version__", sdk_ver)
 
     if json_:

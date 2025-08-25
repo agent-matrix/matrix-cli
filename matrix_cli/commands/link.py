@@ -29,8 +29,12 @@ def _slugify_dir_name(name: str) -> str:
 @app.command()
 def main(
     path: str = typer.Argument(..., help="Path to the local project folder"),
-    as_alias: str | None = typer.Option(None, "--as", help="Alias to assign to this path"),
-    alias: str | None = typer.Option(None, "--alias", help="Alias to assign to this path"),
+    as_alias: str | None = typer.Option(
+        None, "--as", help="Alias to assign to this path"
+    ),
+    alias: str | None = typer.Option(
+        None, "--alias", help="Alias to assign to this path"
+    ),
 ):
     """
     Link a local folder (that already contains a runner.json) to an alias.

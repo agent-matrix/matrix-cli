@@ -37,7 +37,7 @@ help: ## ✨ Show this help message
 	@echo
 	@echo "Usage: make <target>"
 	@echo
-	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "  $(YELLOW)%-20s$(RESET) %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "    $(YELLOW)%-20s$(RESET) %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 	@echo
 
 .PHONY: setup
@@ -71,8 +71,8 @@ install-test-tools: .venv/pyvenv.cfg ## 🧪 Install only test tools (pytest, py
 .PHONY: fmt
 fmt: $(VENV_MARKER) ## 🎨 Format code with Black and Ruff
 	@echo "-> Formatting code..."
-	@$(PYTHON) -m black $(SRC_DIR) $(TEST_DIR) pyproject.toml
-	@$(PYTHON) -m ruff format $(SRC_DIR) $(TEST_DIR) pyproject.toml
+	@$(PYTHON) -m black $(SRC_DIR) $(TEST_DIR)
+	@$(PYTHON) -m ruff format $(SRC_DIR) $(TEST_DIR)
 
 .PHONY: lint
 lint: $(VENV_MARKER) ## 🧹 Lint code with Ruff and Flake8
@@ -127,4 +127,10 @@ docs-build: $(VENV_MARKER) ## 📑 Build the documentation site
 
 # --- Maintenance ---
 
-.P
+.PHONY: clean
+clean: ## 🧹 Remove virtual environment, build artifacts, and caches
+	@echo "-> Cleaning up project..."
+	@rm -rf $(VENV_DIR) $(BUILD_DIR) build *.egg-info
+	@find . -type d -name "__pycache__" -exec rm -r {} +
+	@find . -type d -name ".pytest_cache" -exec rm -r {} +
+	@find . -type d -name ".mypy_cache" -exec rm -r {} +

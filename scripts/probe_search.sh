@@ -4,7 +4,7 @@
 #
 # Usage:
 #   bash scripts/probe_search.sh "hello"
-#   MATRIX_HUB_BASE=http://localhost:7300 bash scripts/probe_search.sh "hello-sse-server"
+#   MATRIX_HUB_BASE=http://localhost:443 bash scripts/probe_search.sh "hello-sse-server"
 #
 # Env:
 #   MATRIX_HUB_BASE   (default: https://api.matrixhub.io)
@@ -22,7 +22,7 @@ HUB="${MATRIX_HUB_BASE:-https://api.matrixhub.io}"
 TOKEN="${MATRIX_HUB_TOKEN:-}"
 LIMIT="${LIMIT:-5}"
 INCLUDE_PENDING="${INCLUDE_PENDING:-1}"
-LOCAL_HUB="http://localhost:7300"
+LOCAL_HUB="http://localhost:443"
 
 # internal flags
 HAS_JQ=0

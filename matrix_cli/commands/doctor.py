@@ -1,7 +1,6 @@
 # matrix_cli/commands/doctor.py
 from __future__ import annotations
 
-import json
 import time
 import typing as _t
 import urllib.error
@@ -10,9 +9,11 @@ import urllib.request
 import typer
 
 from ..config import load_config
-from ..util.console import info, success, warn, error
+from ..util.console import error, success, warn
 
-app = typer.Typer(help="Health check (GET /health) with smart retries and hub preflight")
+app = typer.Typer(
+    help="Health check (GET /health) with smart retries and hub preflight"
+)
 
 
 def _get_attr_or_key(obj: _t.Any, name: str, default: _t.Any = None) -> _t.Any:
@@ -53,7 +54,10 @@ def _probe_health(base_url: str, *, tries: int, wait: float) -> tuple[bool, str]
             except urllib.error.HTTPError as he:
                 last_err = f"HTTP {he.code} from {url}"
             except urllib.error.URLError as ue:
-                last_err = f"{ue.reason} hitting {url}" if getattr(ue, "reason", None) else f"URLError hitting {url}"
+                reason = getattr(ue, "reason", None)
+                last_err = (
+                    f"{reason} hitting {url}" if reason else f"URLError hitting {url}"
+                )
             except Exception as e:  # pragma: no cover - defensive
                 last_err = f"{type(e).__name__}: {e} hitting {url}"
         # linear backoff; keep snappy
@@ -77,13 +81,17 @@ def _hub_preflight(*, hub_base: str, timeout: float = 0.6) -> str | None:
 
     # Try local dev hub quickly
     try:
-        code, _ = _http_get("http://localhost:7300/health", timeout=0.4)
+        code, _ = _http_get("http://localhost:443/health", timeout=0.4)
         if 200 <= code < 300:
-            return "(offline?) couldn't reach public hub; used local dev hub at http://localhost:7300"
+            return (
+                "(offline?) couldn't reach public hub; "
+                "used local dev hub at http://localhost:443"
+            )
     except Exception:
         pass
 
-    return None  # silent if both are down; doctor result should focus on the alias server
+    # silent if both are down; doctor result should focus on the alias server
+    return None
 
 
 @app.command()
@@ -92,7 +100,9 @@ def main(
     tries: int = typer.Option(8, "--tries", help="Max attempts to probe the server"),
     wait: float = typer.Option(0.25, "--wait", help="Delay (s) between attempts"),
     no_hub_check: bool = typer.Option(
-        False, "--no-hub-check", help="Skip small hub preflight (saves ~0.5s on bad networks)."
+        False,
+        "--no-hub-check",
+        help="Skip small hub preflight (saves ~0.5s on bad networks).",
     ),
 ) -> None:
     """
@@ -118,7 +128,7 @@ def main(
         # First, try SDK's own doctor (fast-path). If it returns ok, use it.
         res = runtime.doctor(alias, timeout=max(1, int(wait * 4)))
         if isinstance(res, dict) and str(res.get("status", "")).lower() == "ok":
-            # If SDK includes url info, prefer it; otherwise synthesize below after we find the lock.
+            # If SDK includes url info, prefer it.
             msg = res.get("reason") or "OK"
             success(f"OK - {msg}")
             return
@@ -131,7 +141,7 @@ def main(
     try:
         locks = runtime.status() or []
     except Exception:
-        # If status fails, still let SDK doctor result above be authoritative if it worked.
+        # If status fails, still let SDK doctor result above be authoritative
         pass
 
     lock = None
@@ -153,12 +163,17 @@ def main(
             pass
 
     if lock is None:
-        error(f"FAIL - Status: fail, Reason: no running process found for alias '{alias}'")
+        error(
+            f"FAIL - Status: fail, Reason: no running process found for alias '{alias}'"
+        )
         raise typer.Exit(1)
 
     port = _get_attr_or_key(lock, "port")
     if not port:
-        error("FAIL - Status: fail, Reason: missing port information for the running process")
+        error(
+            "FAIL - Status: fail, Reason: missing port information "
+            "for the running process"
+        )
         raise typer.Exit(1)
 
     base = f"http://127.0.0.1:{int(port)}"

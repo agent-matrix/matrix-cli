@@ -24,7 +24,7 @@ DO_INSTALL="${DO_INSTALL:-0}"
 CLEAR_CACHE="${CLEAR_CACHE:-0}"
 HUB_OVERRIDE="${HUB:-}"
 
-# A bogus hub that will trigger DNS failure → local fallback to http://localhost:7300
+# A bogus hub that will trigger DNS failure → local fallback to http://localhost:443
 BOGUS_HUB="http://does-not-resolve.invalid"
 
 CACHE_FILE="${HOME}/.matrix/cache/resolve.json"
@@ -133,7 +133,7 @@ if [[ "$DO_INSTALL" -eq 1 ]]; then
   # This command is expected to FAIL until the resolver is fixed.
   run "matrix install \"$RAW_ID\" --alias \"$TMP_ALIAS\" --target \"$TMP_TARGET\" --no-prompt $HUB_ARG" --ok-exit 10 --label "7) Install by raw id (default hub)"
 
-  # 8) Install by raw id with forced fallback (bogus hub) — should show offline note and try localhost:7300
+  # 8) Install by raw id with forced fallback (bogus hub) — should show offline note and try localhost:443
   # This command is also expected to FAIL until the resolver is fixed.
   run "matrix install \"$RAW_ID\" --alias \"${TMP_ALIAS}-fb\" --target \"$TMP_TARGET\" --no-prompt --hub \"$BOGUS_HUB\"" --ok-exit 10 --label "8) Install by raw id (forced fallback)"
 

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
 import time
 from pathlib import Path
@@ -93,7 +92,9 @@ def _split_short_id(raw: str) -> Tuple[str | None, str, str | None]:
     return ns, name.strip(), ver
 
 
-def _parse_id_fields(item: Dict[str, Any]) -> Tuple[str | None, str | None, str | None, str | None]:
+def _parse_id_fields(
+    item: Dict[str, Any],
+) -> Tuple[str | None, str | None, str | None, str | None]:
     """
     Try to extract (ns, name, version, type) from a search item.
     Prefer item['id']; fallback to 'type','name','version'.
@@ -304,7 +305,7 @@ def _resolve_fqid_via_search(client, cfg, raw_id: str) -> str:
       • One search with (type=ns or 'mcp_server'), include_pending=True (so dev catalogs resolve offline).
       • If no candidates and ns missing -> one broadened search without type (last resort).
       • Choose best: prefer mcp_server; prefer stable; then highest version.
-      • On public-hub DNS/conn failure -> try once against http://localhost:7300.
+      • On public-hub DNS/conn failure -> try once against http://localhost:443.
     """
     if _is_fqid(raw_id):
         return raw_id
@@ -315,7 +316,9 @@ def _resolve_fqid_via_search(client, cfg, raw_id: str) -> str:
 
     want_ns, want_name, want_ver = _split_short_id(raw_id)
 
-    def _search_once(cli, *, ns_hint: str | None, broaden: bool) -> List[Dict[str, Any]]:
+    def _search_once(
+        cli, *, ns_hint: str | None, broaden: bool
+    ) -> List[Dict[str, Any]]:
         params: Dict[str, Any] = {
             "q": want_name,
             "limit": 25,
@@ -339,10 +342,10 @@ def _resolve_fqid_via_search(client, cfg, raw_id: str) -> str:
             try:
                 from matrix_sdk.client import MatrixClient as _MC
 
-                local_cli = _MC(base_url="http://localhost:7300", token=cfg.token)
+                local_cli = _MC(base_url="http://localhost:443", token=cfg.token)
                 items = _search_once(local_cli, ns_hint=want_ns, broaden=False)
                 warn(
-                    "(offline?) couldn't reach public hub; used local dev hub at http://localhost:7300"
+                    "(offline?) couldn't reach public hub; used local dev hub at http://localhost:443"
                 )
             except Exception:
                 raise
@@ -383,22 +386,84 @@ def _resolve_fqid_via_search(client, cfg, raw_id: str) -> str:
     return fqid
 
 
-def _try_build_with_fallback(
-    primary_installer, id_fq: str, *, target: str, alias: str, cfg
-) -> None:
-    """
-    Try LocalInstaller.build(...) on the primary Hub;
-    if it fails and the primary hub is not localhost, attempt a single fallback to http://localhost:7300.
-    """
-    from matrix_sdk.client import MatrixClient
-    from matrix_sdk.installer import LocalInstaller
+# ------------------------- Safe plan & build (no local path leak) -------------------------
 
-    # try primary hub first
-    primary_installer.build(id_fq, target=target, alias=alias)
-    return
 
-    # NOTE: We only enter fallback when primary_installer.build raises (caught where called).
-    # Kept for clarity — the actual try/except lives in the caller.
+def _sanitize_segment(s: str, fallback: str = "unnamed") -> str:
+    s = (s or "").strip()
+    if not s:
+        return fallback
+    out = []
+    ok = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+    for ch in s:
+        out.append(ch if ch in ok else "_")
+    cleaned = "".join(out).strip(" .")
+    return cleaned or fallback
+
+
+def _label_from_fqid_alias(fqid: str, alias: str) -> str:
+    """
+    Build the server-safe plan label <alias>/<version> from fqid and alias.
+    Never include client paths; sanitize both parts to be cross-platform safe.
+    """
+    ver = fqid.rsplit("@", 1)[-1] if "@" in fqid else "0"
+    return f"{_sanitize_segment(alias)}/{_sanitize_segment(ver)}"
+
+
+def _ensure_local_writable(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    probe = path / ".matrix_write_probe"
+    try:
+        probe.write_text("ok", encoding="utf-8")
+    except Exception as e:
+        raise PermissionError(f"Local install target not writable: {path} — {e}") from e
+    finally:
+        try:
+            probe.unlink()
+        except Exception:
+            pass
+
+
+def _build_via_safe_plan(
+    client, installer, fqid: str, *, target: str, alias: str, timeout: int = 900
+):
+    """
+    Perform install using a server *label* (<alias>/<version>) instead of a client absolute path.
+    Works even if the SDK installer isn't patched, because we call client.install(...) ourselves.
+    """
+    # 1) Ensure local target is writable before network calls
+    tgt_path = Path(target).expanduser().resolve()
+    _ensure_local_writable(tgt_path)
+
+    # 2) Request plan from Hub with a safe label
+    label = _label_from_fqid_alias(fqid, alias)
+    outcome = client.install(fqid, target=label)  # <-- no absolute path leakage
+
+    # 3) Materialize locally (files/artifacts/runner.json)
+    report = installer.materialize(_to_dict(outcome), tgt_path)
+
+    # 4) Load runner and prepare env (venv/node)
+    try:
+        # using the SDK helper if available; fall back to reading runner.json directly
+        load = getattr(installer, "_load_runner_from_report", None)
+        runner = (
+            load(report, tgt_path) if callable(load) else _load_runner_direct(tgt_path)
+        )
+    except Exception:
+        runner = _load_runner_direct(tgt_path)
+
+    installer.prepare_env(tgt_path, runner, timeout=timeout)
+    return tgt_path
+
+
+def _load_runner_direct(target_path: Path) -> Dict[str, Any]:
+    p = target_path / "runner.json"
+    if p.is_file():
+        try:
+            return json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {}
 
 
 # ----------------------------------- CLI -----------------------------------
@@ -427,11 +492,14 @@ def main(
     no_prompt: bool = typer.Option(
         False,
         "--no-prompt",
-        help=("Do not prompt on alias collisions; exit with code 3 if the alias exists"),
+        help=(
+            "Do not prompt on alias collisions; exit with code 3 if the alias exists"
+        ),
     ),
 ) -> None:
     """
-    Install a component locally using the SDK's LocalInstaller.
+    Install a component locally using the SDK — with safe planning to avoid server 500s
+    caused by leaking client absolute paths to the Hub.
 
     Exit codes:
       0  success
@@ -452,14 +520,14 @@ def main(
     client = client_from_config(cfg)
     installer = LocalInstaller(client)
 
-    # Resolve short ids → fully-qualified ids (use new resolver; preserves old behavior otherwise)
+    # Resolve short ids → fully-qualified ids
     try:
         res = resolve_fqid(
             client, cfg, id, prefer_ns="mcp_server", allow_prerelease=False
         )
         fqid = res.fqid
         if res.note:
-            warn(res.note)  # optional: informative “used local hub …” message
+            warn(res.note)
     except Exception as e:
         error(f"Could not resolve id '{id}': {e}")
         raise typer.Exit(10)
@@ -473,33 +541,32 @@ def main(
     existing = store.get(alias)
     if existing and not force:
         msg = f"Alias '{alias}' already exists → {existing.get('target')}"
-        # IMPORTANT: --no-prompt or non-tty should exit with code 3 (tests rely on this)
         if no_prompt or not sys.stdout.isatty():
             warn(msg)
             raise typer.Exit(3)
-        # interactive prompt
         warn(msg)
         if not typer.confirm("Overwrite alias to point to new target?"):
             raise typer.Exit(3)
 
     info(f"Installing {fqid} → {target}")
+
+    # Build via safe plan (primary hub), with single fallback to local dev hub on DNS/conn failure
     try:
         try:
-            _try_build_with_fallback(
-                installer, fqid, target=target, alias=alias, cfg=cfg
-            )
+            _build_via_safe_plan(client, installer, fqid, target=target, alias=alias)
         except Exception as e:
-            # If primary build failed due to DNS/connection on public hub, try local once.
             if _is_dns_or_conn_failure(e):
                 try:
                     warn(
-                        "(offline?) couldn't reach public hub; trying local dev hub at http://localhost:7300"
+                        "(offline?) couldn't reach public hub; trying local dev hub at http://localhost:443"
                     )
                     fb_client = MatrixClient(
-                        base_url="http://localhost:7300", token=cfg.token
+                        base_url="http://localhost:443", token=cfg.token
                     )
                     fb_installer = LocalInstaller(fb_client)
-                    fb_installer.build(fqid, target=target, alias=alias)
+                    _build_via_safe_plan(
+                        fb_client, fb_installer, fqid, target=target, alias=alias
+                    )
                 except Exception:
                     raise e
             else:
