@@ -4,14 +4,15 @@ from __future__ import annotations
 import json
 import sys
 import time
+import urllib.request
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import typer
 
-from ..config import load_config, client_from_config, target_for
+from ..config import client_from_config, load_config, target_for
 from ..util.console import error, info, success, warn
-from .resolution import resolve_fqid  # ← added
+from .resolution import resolve_fqid  # existing resolver (kept)
 
 app = typer.Typer(
     help="Install a component locally",
@@ -295,7 +296,7 @@ def _cache_put(cfg, raw: str, fqid: str) -> None:
 # ------------------------- Resolver & build fallback -------------------------
 
 
-def _resolve_fqid_via_search(client, cfg, raw_id: str) -> str:
+def _resolve_fqid_via_search(client, cfg, raw_id: str) -> str:  # pragma: no cover
     """
     Resolve a short/raw id to a fully-qualified id (ns:name@version) with minimal traffic.
 
@@ -466,6 +467,100 @@ def _load_runner_direct(target_path: Path) -> Dict[str, Any]:
     return {}
 
 
+# ------------------------- Inline manifest helpers (new) -------------------------
+
+
+def _looks_like_url(s: str) -> bool:  # pragma: no cover
+    s = (s or "").strip().lower()
+    return s.startswith("http://") or s.startswith("https://") or s.startswith("file://")
+
+
+def _load_manifest_from(source: str) -> tuple[Dict[str, Any], Optional[str]]:
+    """Load a manifest from URL-like or filesystem path. Returns (manifest, source_url_for_provenance)."""
+    src = (source or "").strip()
+    if not src:
+        raise ValueError("empty manifest source")
+    # Simple loader without new deps: http(s) via urllib, file path via Path
+    if src.lower().startswith("http://") or src.lower().startswith("https://"):
+        # Use stdlib only
+        with urllib.request.urlopen(src, timeout=10) as resp:  # nosec - user-provided dev URL
+            data = resp.read().decode("utf-8")
+        return json.loads(data), src
+    if src.lower().startswith("file://"):
+        p = Path(src[7:])
+        return json.loads(p.read_text(encoding="utf-8")), str(p.as_uri())
+    # treat as filesystem path
+    p = Path(src).expanduser().resolve()
+    return json.loads(p.read_text(encoding="utf-8")), None
+
+
+def _normalize_manifest_for_sse(manifest: Dict[str, Any]) -> Dict[str, Any]:
+    """Force .mcp_registration.server.url → /sse and remove 'transport' (non-destructive for other fields)."""
+    try:
+        mcp = manifest.setdefault("mcp_registration", {})
+        server = mcp.setdefault("server", {})
+        url = (server.get("url") or "").strip()
+        if url:
+            # strip trailing slashes then ensure exactly one '/sse'
+            while url.endswith("/"):
+                url = url[:-1]
+            if not url.endswith("/sse"):
+                url = f"{url}/sse"
+            server["url"] = url
+        # drop transport if present (prevents /messages/ rewrites downstream)
+        if "transport" in server:
+            server.pop("transport", None)
+    except Exception:
+        # do not fail install on normalization; leave manifest unchanged
+        pass
+    return manifest
+
+
+def _build_via_inline_manifest(
+    client,
+    installer,
+    fqid: str,
+    *,
+    manifest: Dict[str, Any],
+    provenance_url: Optional[str],
+    target: str,
+    alias: str,
+    timeout: int = 900,
+):
+    """Install using an inline manifest via client.install_manifest (non-destructive fallback if unavailable)."""
+    tgt_path = Path(target).expanduser().resolve()
+    _ensure_local_writable(tgt_path)
+
+    # send label instead of absolute path
+    label = _label_from_fqid_alias(fqid, alias)
+
+    # Duck-typed feature: prefer client.install_manifest if present
+    install_manifest_fn = getattr(client, "install_manifest", None)
+    if not callable(install_manifest_fn):
+        raise RuntimeError(
+            "This matrix-sdk build does not support inline manifest installs. "
+            "Please upgrade the SDK (client.install_manifest) or omit --manifest."
+        )
+
+    body_provenance = {"source_url": provenance_url} if provenance_url else None
+    outcome = install_manifest_fn(
+        fqid, manifest=manifest, target=label, provenance=body_provenance
+    )
+
+    report = installer.materialize(_to_dict(outcome), tgt_path)
+
+    try:
+        load = getattr(installer, "_load_runner_from_report", None)
+        runner = (
+            load(report, tgt_path) if callable(load) else _load_runner_direct(tgt_path)
+        )
+    except Exception:
+        runner = _load_runner_direct(tgt_path)
+
+    installer.prepare_env(tgt_path, runner, timeout=timeout)
+    return tgt_path
+
+
 # ----------------------------------- CLI -----------------------------------
 
 
@@ -486,6 +581,15 @@ def main(
     hub: str | None = typer.Option(
         None, "--hub", help="Override Hub base URL for this command"
     ),
+    manifest: str | None = typer.Option(
+        None,
+        "--manifest",
+        "--from",
+        help=(
+            "Manifest path or URL to install inline (bypasses Hub source_url fetch). "
+            "Accepted: http(s)://, file://, or filesystem path."
+        ),
+    ),
     force: bool = typer.Option(
         False, "--force", "-f", help="Overwrite existing alias without prompting"
     ),
@@ -501,15 +605,20 @@ def main(
     Install a component locally using the SDK — with safe planning to avoid server 500s
     caused by leaking client absolute paths to the Hub.
 
+    New (non-breaking):
+      • --manifest/--from lets you provide a manifest inline when Hub lacks source_url.
+      • Resolver prefers the namespace the user typed (tool:/mcp_server:/server:),
+        falling back to mcp_server.
+
     Exit codes:
       0  success
       3  alias collision (with --no-prompt or declined overwrite)
-     10  hub/network/build/resolve error
+      10 hub/network/build/resolve error
     """
     from matrix_sdk.alias import AliasStore
-    from matrix_sdk.installer import LocalInstaller
-    from matrix_sdk.ids import suggest_alias
     from matrix_sdk.client import MatrixClient
+    from matrix_sdk.ids import suggest_alias
+    from matrix_sdk.installer import LocalInstaller
 
     cfg = load_config()
     if hub:
@@ -520,11 +629,17 @@ def main(
     client = client_from_config(cfg)
     installer = LocalInstaller(client)
 
-    # Resolve short ids → fully-qualified ids
+    # Resolve short ids → fully-qualified ids (derive prefer_ns from input)
     try:
-        res = resolve_fqid(
-            client, cfg, id, prefer_ns="mcp_server", allow_prerelease=False
-        )
+        ns_input = id.split(":", 1)[0] if ":" in id else None
+        prefer_ns = ns_input or "mcp_server"
+        try:
+            res = resolve_fqid(
+                client, cfg, id, prefer_ns=prefer_ns, allow_prerelease=False
+            )
+        except TypeError:
+            # fallback for older CLIs where resolver lacks kwargs
+            res = resolve_fqid(client, cfg, id)
         fqid = res.fqid
         if res.note:
             warn(res.note)
@@ -550,28 +665,82 @@ def main(
 
     info(f"Installing {fqid} → {target}")
 
-    # Build via safe plan (primary hub), with single fallback to local dev hub on DNS/conn failure
+    # Primary path: inline manifest when provided; else default safe-plan path
     try:
-        try:
-            _build_via_safe_plan(client, installer, fqid, target=target, alias=alias)
-        except Exception as e:
-            if _is_dns_or_conn_failure(e):
-                try:
-                    warn(
-                        "(offline?) couldn't reach public hub; trying local dev hub at http://localhost:443"
-                    )
-                    fb_client = MatrixClient(
-                        base_url="http://localhost:443", token=cfg.token
-                    )
-                    fb_installer = LocalInstaller(fb_client)
-                    _build_via_safe_plan(
-                        fb_client, fb_installer, fqid, target=target, alias=alias
-                    )
-                except Exception:
-                    raise e
-            else:
-                raise
+        if manifest:
+            # Load + normalize + install inline
+            try:
+                mf, src_url = _load_manifest_from(manifest)
+                mf = _normalize_manifest_for_sse(mf)
+            except Exception as e:
+                error(f"Failed to load manifest from '{manifest}': {e}")
+                raise typer.Exit(10)
+
+            # Try primary hub, then fallback to localhost:443 on DNS/conn error
+            try:
+                _build_via_inline_manifest(
+                    client,
+                    installer,
+                    fqid,
+                    manifest=mf,
+                    provenance_url=src_url,
+                    target=target,
+                    alias=alias,
+                )
+            except Exception as e:
+                if _is_dns_or_conn_failure(e):
+                    try:
+                        warn(
+                            "(offline?) couldn't reach public hub; trying local dev hub at http://localhost:443"
+                        )
+                        fb_client = MatrixClient(
+                            base_url="http://localhost:443", token=cfg.token
+                        )
+                        fb_installer = LocalInstaller(fb_client)
+                        _build_via_inline_manifest(
+                            fb_client,
+                            fb_installer,
+                            fqid,
+                            manifest=mf,
+                            provenance_url=src_url,
+                            target=target,
+                            alias=alias,
+                        )
+                    except Exception:
+                        raise
+                else:
+                    raise
+        else:
+            # legacy/default path — requires Hub to have a source_url recorded
+            try:
+                _build_via_safe_plan(client, installer, fqid, target=target, alias=alias)
+            except Exception as e:
+                if _is_dns_or_conn_failure(e):
+                    try:
+                        warn(
+                            "(offline?) couldn't reach public hub; trying local dev hub at http://localhost:443"
+                        )
+                        fb_client = MatrixClient(
+                            base_url="http://localhost:443", token=cfg.token
+                        )
+                        fb_installer = LocalInstaller(fb_client)
+                        _build_via_safe_plan(
+                            fb_client, fb_installer, fqid, target=target, alias=alias
+                        )
+                    except Exception:
+                        raise
+                else:
+                    raise
     except Exception as e:
+        # Helpful hint for the common 422 source_url failure
+        s = (str(e) or "").lower()
+        if ("source_url" in s and "missing" in s) or (
+            "unable to load manifest" in s and "source_url" in s
+        ):
+            warn(
+                "Hub could not fetch a manifest for this id (no source_url). "
+                "Provide one with --manifest <path-or-url> to install inline."
+            )
         error(f"Install failed: {e}")
         raise typer.Exit(10)
 

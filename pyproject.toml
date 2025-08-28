@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "matrix-cli"
-version = "0.1.2"
+version = "0.1.2.dev0"
 description = "Matrix CLI — thin UX layer over matrix-python-sdk (deep links, local builder, runtime)"
 readme = { file = "README.md", content-type = "text/markdown" }
 license = "Apache-2.0"
@@ -28,9 +28,10 @@ classifiers = [
 dependencies = [
   "typer>=0.12",
   "rich>=13.7",
-  "matrix-python-sdk>=0.1.5",
+  # Ensure a matching SDK wheel is available in testers' wheelhouse during offline install
+  "matrix-python-sdk>=0.1.5.dev0",
   "httpx>=0.28,<0.29",
-  "requests>=2.32" 
+  "requests>=2.32"
 ]
 
 [project.urls]
@@ -68,9 +69,10 @@ dev = [
   "mkdocs-material>=9.5",
 ]
 
-mcp = [  "mcp>=1.13.1",
+mcp = [
+  "mcp>=1.13.1",
   "websockets>=12.0"
-  ]
+]
 
 [tool.setuptools.packages.find]
 include = ["matrix_cli*"]
@@ -81,5 +83,5 @@ addopts = "-q"
 pythonpath = ["."]
 
 [tool.ruff.lint]
-# Add E501 to the list of ignored error codes
-ignore = ["E501"] 
+# Ignore long lines for CLI messages
+ignore = ["E501"]
