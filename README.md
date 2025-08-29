@@ -4,7 +4,7 @@
 
 [![PyPI Version](https://img.shields.io/pypi/v/matrix-cli.svg)](https://pypi.org/project/matrix-cli/)
 [![Python 3.11+](https://img.shields.io/pypi/pyversions/matrix-cli.svg)](https://pypi.org/project/matrix-cli/)
-[![GitHub](https://img.shields.io/badge/github-agent--matrix%2Fmatrix--cli-black?logo=github)](https://github.com/agent-matrix/matrix-cli)
+[![GitHub](https://img.shields.io/badge/github-agent--matrix?logo=github)](https://github.com/agent-matrix/matrix-cli)
 [![Docs (MkDocs)](https://img.shields.io/badge/docs-mkdocs-blue?logo=mkdocs)](https://agent-matrix.github.io/matrix-cli/)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache%202.0-blue)](./LICENSE) <a href="https://github.com/agent-matrix/matrix-hub"> <img src="https://img.shields.io/badge/Powered%20by-matrix--hub-brightgreen" alt="Powered by matrix-hub"> </a>
 
