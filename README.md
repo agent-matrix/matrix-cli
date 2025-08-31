@@ -10,6 +10,9 @@
 
 > Requires **Python 3.11+** and **matrix-python-sdk ≥ 0.1.6**.
 
+
+
+
 ---
 
 ## 🚀 What’s new in v0.1.3
@@ -31,7 +34,11 @@
 > 2. **Connector runner** (attach to a remote/local SSE URL).
 >    The CLI treats both uniformly in PS/Logs/Doctor.
 
+
+![Matrix CLI Demo](assets/matrix_cli_demo_watsonx.gif)
+
 ---
+
 
 ## 📦 Install
 

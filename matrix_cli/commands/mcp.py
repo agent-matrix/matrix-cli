@@ -21,7 +21,9 @@ _logger = logging.getLogger("matrix_cli.mcp")
 if (os.getenv("MATRIX_CLI_DEBUG") or "").strip().lower() in {"1", "true", "yes", "on"}:
     if not _logger.handlers:
         _h = logging.StreamHandler()
-        _h.setFormatter(logging.Formatter("[matrix-cli][mcp] %(levelname)s: %(message)s"))
+        _h.setFormatter(
+            logging.Formatter("[matrix-cli][mcp] %(levelname)s: %(message)s")
+        )
         _logger.addHandler(_h)
     _logger.setLevel(logging.DEBUG)
 else:
@@ -74,7 +76,9 @@ def _jsonify_content_block(block: Any) -> Dict[str, Any]:
         out: Dict[str, Any] = {}
         for k, v in block.items():
             try:
-                out[str(k)] = v if isinstance(v, (str, int, float, bool, type(None))) else repr(v)
+                out[str(k)] = (
+                    v if isinstance(v, (str, int, float, bool, type(None))) else repr(v)
+                )
             except Exception:
                 out[str(k)] = "<unrepr>"
         return out
@@ -362,7 +366,11 @@ def _final_url_from_inputs(
         if row is None:
             rows = _runtime_rows(matrix_home)
             running = (
-                ", ".join(sorted({(r.get("alias") or "").strip() for r in rows if r.get("alias")}))
+                ", ".join(
+                    sorted(
+                        {(r.get("alias") or "").strip() for r in rows if r.get("alias")}
+                    )
+                )
                 or "(none)"
             )
             hint = f" Did you mean: {', '.join(suggestions)}?" if suggestions else ""
@@ -507,7 +515,9 @@ async def _probe_async(
 
                 if call_tool:
                     try:
-                        resp = await session.call_tool(name=call_tool, arguments=call_args)
+                        resp = await session.call_tool(
+                            name=call_tool, arguments=call_args
+                        )
                         content = getattr(resp, "content", [])
                         report["call"] = {
                             "tool": call_tool,

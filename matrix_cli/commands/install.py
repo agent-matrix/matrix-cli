@@ -6,8 +6,8 @@ import sys
 import time
 import urllib.request
 import subprocess  # NEW: for optional git clone
-import tempfile    # NEW
-import shutil      # NEW
+import tempfile  # NEW
+import shutil  # NEW
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -437,7 +437,7 @@ def _build_via_safe_plan(
     alias: str,
     timeout: int = 900,
     runner_url: str | None = None,  # NEW
-    repo_url: str | None = None,    # NEW
+    repo_url: str | None = None,  # NEW
 ):
     """
     Perform install using a server *label* (<alias>/<version>) instead of a client absolute path.
@@ -494,7 +494,9 @@ def _load_runner_direct(target_path: Path) -> Dict[str, Any]:
 
 def _looks_like_url(s: str) -> bool:  # pragma: no cover
     s = (s or "").strip().lower()
-    return s.startswith("http://") or s.startswith("https://") or s.startswith("file://")
+    return (
+        s.startswith("http://") or s.startswith("https://") or s.startswith("file://")
+    )
 
 
 def _load_manifest_from(source: str) -> tuple[Dict[str, Any], Optional[str]]:
@@ -549,7 +551,7 @@ def _build_via_inline_manifest(
     alias: str,
     timeout: int = 900,
     runner_url: str | None = None,  # NEW
-    repo_url: str | None = None,    # NEW
+    repo_url: str | None = None,  # NEW
 ):
     """Install using an inline manifest via client.install_manifest (non-destructive fallback if unavailable)."""
     tgt_path = Path(target).expanduser().resolve()
@@ -654,7 +656,9 @@ def _maybe_fetch_runner_and_repo(
             if _valid_runner_schema(obj):
                 _write_runner(obj)
             else:
-                warn("--runner-url: fetched runner.json failed schema validation (ignored)")
+                warn(
+                    "--runner-url: fetched runner.json failed schema validation (ignored)"
+                )
         except Exception as e:
             warn(f"--runner-url: failed to fetch runner.json ({e})")
 
@@ -669,7 +673,9 @@ def _maybe_fetch_runner_and_repo(
                 if _valid_runner_schema(obj):
                     _write_runner(obj)
                 else:
-                    warn("plan.runner_url: fetched runner.json failed schema validation (ignored)")
+                    warn(
+                        "plan.runner_url: fetched runner.json failed schema validation (ignored)"
+                    )
             except Exception as e:
                 warn(f"plan.runner_url: failed to fetch runner.json ({e})")
 
@@ -700,7 +706,9 @@ def _maybe_fetch_runner_and_repo(
         if need_clone:
             try:
                 with tempfile.TemporaryDirectory() as tmpd:
-                    subprocess.run(["git", "clone", "--depth=1", repo_url, tmpd], check=True)
+                    subprocess.run(
+                        ["git", "clone", "--depth=1", repo_url, tmpd], check=True
+                    )
                     # copy into target (excluding .git)
                     for p in Path(tmpd).iterdir():
                         if p.name == ".git":
@@ -854,7 +862,7 @@ def main(
                     target=target,
                     alias=alias,
                     runner_url=runner_url,  # NEW
-                    repo_url=repo_url,      # NEW
+                    repo_url=repo_url,  # NEW
                 )
             except Exception as e:
                 if _is_dns_or_conn_failure(e):
@@ -875,7 +883,7 @@ def main(
                             target=target,
                             alias=alias,
                             runner_url=runner_url,  # NEW
-                            repo_url=repo_url,      # NEW
+                            repo_url=repo_url,  # NEW
                         )
                     except Exception:
                         raise
@@ -891,7 +899,7 @@ def main(
                     target=target,
                     alias=alias,
                     runner_url=runner_url,  # NEW
-                    repo_url=repo_url,      # NEW
+                    repo_url=repo_url,  # NEW
                 )
             except Exception as e:
                 if _is_dns_or_conn_failure(e):
@@ -910,7 +918,7 @@ def main(
                             target=target,
                             alias=alias,
                             runner_url=runner_url,  # NEW
-                            repo_url=repo_url,      # NEW
+                            repo_url=repo_url,  # NEW
                         )
                     except Exception:
                         raise
