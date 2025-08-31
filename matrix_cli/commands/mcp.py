@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import difflib
 import json
+import logging
 import os
 from dataclasses import asdict as _dc_asdict, is_dataclass as _dc_is_dataclass
 from pathlib import Path
@@ -13,6 +14,23 @@ import typer
 
 from ..config import load_config
 
+# ------------------------------------------------------------------------------
+# Logging
+# ------------------------------------------------------------------------------
+_logger = logging.getLogger("matrix_cli.mcp")
+if (os.getenv("MATRIX_CLI_DEBUG") or "").strip().lower() in {"1", "true", "yes", "on"}:
+    if not _logger.handlers:
+        _h = logging.StreamHandler()
+        _h.setFormatter(logging.Formatter("[matrix-cli][mcp] %(levelname)s: %(message)s"))
+        _logger.addHandler(_h)
+    _logger.setLevel(logging.DEBUG)
+else:
+    # Avoid noisy root logger if user didn't opt into debug
+    _logger.addHandler(logging.NullHandler())
+
+# ------------------------------------------------------------------------------
+# Typer app
+# ------------------------------------------------------------------------------
 app = typer.Typer(
     name="mcp",
     help="MCP utilities (probe or call an MCP server over SSE/WebSocket).",
@@ -26,6 +44,7 @@ DEFAULT_HOST = "127.0.0.1"  # local runners bind here by default
 
 # ----------------------------- small helpers ----------------------------- #
 def _normalize_endpoint(ep: str | None) -> str:
+    """Normalize an endpoint to '/path/' form (with a trailing slash)."""
     ep = (ep or "").strip()
     if not ep:
         return DEFAULT_ENDPOINT
@@ -37,12 +56,12 @@ def _normalize_endpoint(ep: str | None) -> str:
 
 
 def _is_http_like(url: str) -> bool:
-    u = (url or "").lower()
+    u = (url or "").strip().lower()
     return u.startswith("http://") or u.startswith("https://")
 
 
 def _is_ws_like(url: str) -> bool:
-    u = (url or "").lower()
+    u = (url or "").strip().lower()
     return u.startswith("ws://") or u.startswith("wss://")
 
 
@@ -50,9 +69,22 @@ def _jsonify_content_block(block: Any) -> Dict[str, Any]:
     """
     Best-effort normalization of MCP content blocks (TextContent, etc.) without importing classes.
     """
+    # If it's already a JSON-like dict with a 'type', just sanitize minimally.
+    if isinstance(block, dict) and "type" in block:
+        out: Dict[str, Any] = {}
+        for k, v in block.items():
+            try:
+                out[str(k)] = v if isinstance(v, (str, int, float, bool, type(None))) else repr(v)
+            except Exception:
+                out[str(k)] = "<unrepr>"
+        return out
+
     t = getattr(block, "type", None)
     if t == "text" and hasattr(block, "text"):
-        return {"type": "text", "text": getattr(block, "text", "")}
+        try:
+            return {"type": "text", "text": getattr(block, "text", "")}
+        except Exception:
+            return {"type": "text", "text": "<unrepr>"}
     try:
         return {"type": str(t or type(block).__name__), "repr": repr(block)}
     except Exception:
@@ -68,7 +100,6 @@ def _to_jsonable(obj: Any, _depth: int = 0) -> Any:
     if obj is None or isinstance(obj, (bool, int, float, str)):
         return obj
     if _depth > 6:
-        # Prevent pathological recursion
         try:
             return repr(obj)
         except Exception:
@@ -191,15 +222,13 @@ def _endpoint_from_runner_json(target_path: str | None) -> str:
             ep = env.get("ENDPOINT") or env.get("MCP_SSE_ENDPOINT")
             if ep:
                 return _normalize_endpoint(str(ep))
-    except Exception:
-        pass
+    except Exception as e:
+        _logger.debug("runner.json parse failed: %s", e)
     return DEFAULT_ENDPOINT
 
 
 def _row_to_dict(row: Any) -> Dict[str, Any]:
-    """
-    Accommodate SDKs that return objects or dicts for runtime.status() rows.
-    """
+    """Accommodate SDKs that return objects or dicts for runtime.status() rows."""
     if isinstance(row, dict):
         return row
     d: Dict[str, Any] = {}
@@ -209,18 +238,19 @@ def _row_to_dict(row: Any) -> Dict[str, Any]:
 
 
 def _runtime_rows(matrix_home: str | None) -> List[Dict[str, Any]]:
-    """
-    Fetch runtime rows as dicts. Return [] on errors.
-    """
+    """Fetch runtime rows as dicts. Return [] on errors."""
     try:
         if matrix_home:
             os.environ["MATRIX_HOME"] = matrix_home
         from matrix_sdk import runtime  # lazy import
-    except Exception:
+    except Exception as e:
+        _logger.debug("runtime import failed: %s", e)
         return []
     try:
-        return [_row_to_dict(r) for r in (runtime.status() or [])]
-    except Exception:
+        rows = runtime.status() or []
+        return [_row_to_dict(r) for r in rows]
+    except Exception as e:
+        _logger.debug("runtime.status failed: %s", e)
         return []
 
 
@@ -241,8 +271,8 @@ def _load_alias_store_target(alias: str, matrix_home: str | None) -> Optional[st
             tgt = ent.get("target") or ent.get("path")
             if tgt:
                 return str(tgt)
-    except Exception:
-        pass
+    except Exception as e:
+        _logger.debug("AliasStore lookup failed: %s", e)
 
     # File fallback
     try:
@@ -256,8 +286,8 @@ def _load_alias_store_target(alias: str, matrix_home: str | None) -> Optional[st
                     tgt = ent.get("target") or ent.get("path")
                     if tgt:
                         return str(tgt)
-    except Exception:
-        pass
+    except Exception as e:
+        _logger.debug("aliases.json lookup failed: %s", e)
     return None
 
 
@@ -280,13 +310,13 @@ def _discover_row_for_alias(
 
     # 1) exact
     for rd in rows:
-        a = rd.get("alias") or ""
+        a = (rd.get("alias") or "").strip()
         if a == want:
             return rd, []
 
     # 2) case-insensitive
     for rd in rows:
-        a = rd.get("alias") or ""
+        a = (rd.get("alias") or "").strip()
         if a.casefold() == want_ci:
             return rd, []
 
@@ -324,6 +354,7 @@ def _final_url_from_inputs(
     Raises ValueError if it cannot determine a URL (with helpful suggestions).
     """
     if url:
+        # User gave full URL; trust it (caller may already normalize /sse or /messages)
         return url, {}
 
     if alias:
@@ -331,12 +362,10 @@ def _final_url_from_inputs(
         if row is None:
             rows = _runtime_rows(matrix_home)
             running = (
-                ", ".join(sorted({r.get("alias") for r in rows if r.get("alias")}))
+                ", ".join(sorted({(r.get("alias") or "").strip() for r in rows if r.get("alias")}))
                 or "(none)"
             )
-            hint = ""
-            if suggestions:
-                hint = f" Did you mean: {', '.join(suggestions)}?"
+            hint = f" Did you mean: {', '.join(suggestions)}?" if suggestions else ""
             raise ValueError(
                 f"Could not auto-discover port for alias '{alias}'. Provide --port or use --url.{hint} "
                 f"Running aliases: {running}"
@@ -360,6 +389,53 @@ def _final_url_from_inputs(
         return final, row
 
     raise ValueError("Provide --url OR --alias (optionally with --port).")
+
+
+def _read_args_json(args_json: Optional[str]) -> Tuple[Dict[str, Any], Optional[str]]:
+    """
+    Parse the --args value. Supports plain JSON or @path to read from file.
+    Returns (parsed_dict, error_message_or_None).
+    """
+    if not args_json:
+        return {}, None
+    try:
+        s = args_json.strip()
+        if s.startswith("@"):
+            path = Path(s[1:]).expanduser()
+            content = path.read_text(encoding="utf-8")
+            obj = json.loads(content)
+        else:
+            obj = json.loads(s)
+        if not isinstance(obj, dict):
+            return {}, "--args must be a JSON object (e.g. '{}')"
+        return obj, None
+    except Exception as e:
+        return {}, f"Invalid JSON for --args: {e}"
+
+
+def _flatten_exception(e: BaseException, _depth: int = 0) -> str:
+    """
+    Make a short, human-friendly error string from ExceptionGroup / nested exceptions.
+    """
+    try:
+        name = getattr(e, "__class__", type(e)).__name__
+        msg = str(e)
+        # Python 3.11 ExceptionGroup compatible flattening
+        eg = getattr(e, "exceptions", None)
+        if eg and isinstance(eg, (list, tuple)) and _depth < 3:
+            if eg:
+                return _flatten_exception(eg[0], _depth + 1)
+        # Prefer the innermost cause if present
+        cause = getattr(e, "__cause__", None) or getattr(e, "__context__", None)
+        if cause and _depth < 3:
+            inner = _flatten_exception(cause, _depth + 1)
+            return inner or (msg or name)
+        return msg or name
+    except Exception:
+        try:
+            return repr(e)
+        except Exception:
+            return "unhandled error"
 
 
 # ----------------------------- core async work ---------------------------- #
@@ -409,17 +485,9 @@ async def _probe_async(
         return {"ok": False, "reason": f"Unsupported URL scheme for MCP: {url}"}
 
     # Parse args for an optional call
-    call_args: Dict[str, Any] = {}
-    if args_json:
-        try:
-            call_args = json.loads(args_json)
-            if not isinstance(call_args, dict):
-                return {
-                    "ok": False,
-                    "reason": "--args must be a JSON object (e.g. '{}')",
-                }
-        except Exception as e:
-            return {"ok": False, "reason": f"Invalid JSON for --args: {e}"}
+    call_args, err = _read_args_json(args_json)
+    if err:
+        return {"ok": False, "reason": err}
 
     # Connect and interact
     try:
@@ -432,7 +500,6 @@ async def _probe_async(
                     "ok": True,
                     "url": url,
                     "initialized": True,
-                    # ← FIX: make everything JSON-serializable
                     "init": _to_jsonable(init_result),
                     "tools": [t.name for t in getattr(tools, "tools", [])],
                     "call": None,
@@ -440,9 +507,7 @@ async def _probe_async(
 
                 if call_tool:
                     try:
-                        resp = await session.call_tool(
-                            name=call_tool, arguments=call_args
-                        )
+                        resp = await session.call_tool(name=call_tool, arguments=call_args)
                         content = getattr(resp, "content", [])
                         report["call"] = {
                             "tool": call_tool,
@@ -454,13 +519,13 @@ async def _probe_async(
                         report["call"] = {
                             "tool": call_tool,
                             "args": call_args,
-                            "error": str(e),
+                            "error": _flatten_exception(e),
                         }
 
                 return report
     except BaseException as e:
-        name = getattr(e, "__class__", type(e)).__name__
-        return {"ok": False, "reason": f"{name}: {e}"}
+        # Broader than Exception to include CancelledError, etc.
+        return {"ok": False, "reason": _flatten_exception(e)}
 
 
 def _run_probe_and_render(
@@ -477,10 +542,9 @@ def _run_probe_and_render(
         raise typer.Exit(130)
 
     if json_out:
-        # Ensure robust JSON even if any nested object slipped in
-        safe = _to_jsonable(report)
+        safe = _to_jsonable(report)  # ensure robust JSON
         typer.echo(json.dumps(safe, indent=2, sort_keys=True))
-        raise typer.Exit(0 if safe.get("ok") else 2)
+        raise typer.Exit(0 if bool(safe.get("ok")) else 2)
 
     if not report.get("ok"):
         typer.echo(f"❌ {report.get('reason', 'probe failed')}", err=True)
@@ -548,7 +612,7 @@ def probe(
     args: Optional[str] = typer.Option(
         None,
         "--args",
-        help="JSON object with arguments for --call. Example: '{}'",
+        help="JSON object with arguments for --call. Example: '{}' or '@/path/to/args.json'",
         show_default=False,
     ),
     timeout: float = typer.Option(
@@ -620,7 +684,7 @@ def call(
     args: Optional[str] = typer.Option(
         None,
         "--args",
-        help="JSON object with arguments for the tool. Example: '{}'",
+        help="JSON object with arguments for the tool. Example: '{}' or '@/path/to/args.json'",
         show_default=False,
     ),
     timeout: float = typer.Option(

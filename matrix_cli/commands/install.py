@@ -5,6 +5,9 @@ import json
 import sys
 import time
 import urllib.request
+import subprocess  # NEW: for optional git clone
+import tempfile    # NEW
+import shutil      # NEW
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -305,7 +308,7 @@ def _resolve_fqid_via_search(client, cfg, raw_id: str) -> str:  # pragma: no cov
       • Cache hit -> return.
       • One search with (type=ns or 'mcp_server'), include_pending=True (so dev catalogs resolve offline).
       • If no candidates and ns missing -> one broadened search without type (last resort).
-      • Choose best: prefer mcp_server; prefer stable; then highest version.
+      • Choose best: prefer type 'mcp_server', then latest (stable > pre), else any type latest.
       • On public-hub DNS/conn failure -> try once against http://localhost:443.
     """
     if _is_fqid(raw_id):
@@ -426,7 +429,15 @@ def _ensure_local_writable(path: Path) -> None:
 
 
 def _build_via_safe_plan(
-    client, installer, fqid: str, *, target: str, alias: str, timeout: int = 900
+    client,
+    installer,
+    fqid: str,
+    *,
+    target: str,
+    alias: str,
+    timeout: int = 900,
+    runner_url: str | None = None,  # NEW
+    repo_url: str | None = None,    # NEW
 ):
     """
     Perform install using a server *label* (<alias>/<version>) instead of a client absolute path.
@@ -442,6 +453,17 @@ def _build_via_safe_plan(
 
     # 3) Materialize locally (files/artifacts/runner.json)
     report = installer.materialize(_to_dict(outcome), tgt_path)
+
+    # 3.1) (NEW) Post-materialize: fetch runner.json and/or clone repo if needed
+    try:
+        _maybe_fetch_runner_and_repo(
+            tgt_path,
+            report=_to_dict(outcome),
+            runner_url=runner_url,
+            repo_url=repo_url,
+        )
+    except Exception as e:
+        warn(f"post-materialize runner/repo step failed (non-fatal): {e}")
 
     # 4) Load runner and prepare env (venv/node)
     try:
@@ -526,6 +548,8 @@ def _build_via_inline_manifest(
     target: str,
     alias: str,
     timeout: int = 900,
+    runner_url: str | None = None,  # NEW
+    repo_url: str | None = None,    # NEW
 ):
     """Install using an inline manifest via client.install_manifest (non-destructive fallback if unavailable)."""
     tgt_path = Path(target).expanduser().resolve()
@@ -549,6 +573,17 @@ def _build_via_inline_manifest(
 
     report = installer.materialize(_to_dict(outcome), tgt_path)
 
+    # (NEW) Post-materialize: fetch runner.json and/or clone repo if needed
+    try:
+        _maybe_fetch_runner_and_repo(
+            tgt_path,
+            report=_to_dict(outcome),
+            runner_url=runner_url,
+            repo_url=repo_url,
+        )
+    except Exception as e:
+        warn(f"post-materialize runner/repo step failed (non-fatal): {e}")
+
     try:
         load = getattr(installer, "_load_runner_from_report", None)
         runner = (
@@ -559,6 +594,125 @@ def _build_via_inline_manifest(
 
     installer.prepare_env(tgt_path, runner, timeout=timeout)
     return tgt_path
+
+
+# ------------------------- Runner & repo helpers (NEW) -------------------------
+
+
+def _valid_runner_schema(obj: Dict[str, Any]) -> bool:
+    t = (obj.get("type") or "").strip().lower()
+    if t == "connector":
+        return bool((obj.get("url") or "").strip())
+    if t in {"python", "node"}:
+        return bool((obj.get("entry") or "").strip())
+    return False
+
+
+def _plan_runner_url(report_or_outcome: Dict[str, Any]) -> str:
+    try:
+        plan = report_or_outcome.get("plan", report_or_outcome) or {}
+        return (plan.get("runner_url") or "").strip()
+    except Exception:
+        return ""
+
+
+def _maybe_fetch_runner_and_repo(
+    tgt_path: Path,
+    *,
+    report: Dict[str, Any] | None,
+    runner_url: str | None,
+    repo_url: str | None,
+) -> None:
+    """
+    Make installs 'just work' when Hub doesn't provide artifacts:
+      • If --runner-url is provided: ALWAYS fetch into runner.json (backup if exists).
+      • Else if no runner.json and plan.runner_url exists: fetch it.
+      • If --repo-url is provided and the runner points to a missing entry file:
+         clone the repo into the target (excluding .git).
+    Non-fatal on failures; logs warnings.
+    """
+    tgt_path.mkdir(parents=True, exist_ok=True)
+    rpath = tgt_path / "runner.json"
+
+    def _write_runner(obj: Dict[str, Any]) -> None:
+        if rpath.exists():
+            backup = rpath.with_suffix(rpath.suffix + f".bak.{int(time.time())}")
+            try:
+                shutil.copy2(rpath, backup)
+                warn(f"runner.json existed; backed up to {backup.name}")
+            except Exception:
+                pass
+        rpath.write_text(json.dumps(obj, indent=2), encoding="utf-8")
+        info(f"runner.json written → {rpath}")
+
+    # 1) Fetch runner from CLI flag (strong override)
+    if (runner_url or "").strip():
+        try:
+            with urllib.request.urlopen(runner_url, timeout=15) as resp:
+                data = resp.read().decode("utf-8")
+            obj = json.loads(data)
+            if _valid_runner_schema(obj):
+                _write_runner(obj)
+            else:
+                warn("--runner-url: fetched runner.json failed schema validation (ignored)")
+        except Exception as e:
+            warn(f"--runner-url: failed to fetch runner.json ({e})")
+
+    # 2) Else if no runner.json and plan provided a runner_url
+    elif not rpath.exists():
+        url = _plan_runner_url(report or {})
+        if url:
+            try:
+                with urllib.request.urlopen(url, timeout=15) as resp:
+                    data = resp.read().decode("utf-8")
+                obj = json.loads(data)
+                if _valid_runner_schema(obj):
+                    _write_runner(obj)
+                else:
+                    warn("plan.runner_url: fetched runner.json failed schema validation (ignored)")
+            except Exception as e:
+                warn(f"plan.runner_url: failed to fetch runner.json ({e})")
+
+    # 3) Optionally clone repo if needed and asked for
+    if (repo_url or "").strip():
+        need_clone = False
+        try:
+            obj = json.loads(rpath.read_text(encoding="utf-8"))
+        except Exception:
+            obj = {}
+
+        t = (obj.get("type") or "").strip().lower()
+        if t == "python":
+            entry = (obj.get("entry") or "").strip()
+            if not entry:
+                need_clone = True
+            else:
+                if not (tgt_path / entry).exists():
+                    need_clone = True
+        elif t == "node":
+            entry = (obj.get("entry") or "").strip()
+            if not entry or not (tgt_path / entry).exists():
+                need_clone = True
+        else:
+            # no runner or connector: if user asked to clone, allow it
+            need_clone = True
+
+        if need_clone:
+            try:
+                with tempfile.TemporaryDirectory() as tmpd:
+                    subprocess.run(["git", "clone", "--depth=1", repo_url, tmpd], check=True)
+                    # copy into target (excluding .git)
+                    for p in Path(tmpd).iterdir():
+                        if p.name == ".git":
+                            continue
+                        dest = tgt_path / p.name
+                        if p.is_dir():
+                            shutil.copytree(p, dest, dirs_exist_ok=True)
+                        else:
+                            shutil.copy2(p, dest)
+                info(f"Repository cloned into {tgt_path}")
+            except Exception as e:
+                warn(f"--repo-url: failed to clone into target ({e})")
 
 
 # ----------------------------------- CLI -----------------------------------
@@ -590,6 +744,17 @@ def main(
             "Accepted: http(s)://, file://, or filesystem path."
         ),
     ),
+    # NEW — works now, no Hub change required
+    runner_url: str | None = typer.Option(
+        None,
+        "--runner-url",
+        help="URL to a runner.json to write into the target when none is provided by the plan.",
+    ),
+    repo_url: str | None = typer.Option(
+        None,
+        "--repo-url",
+        help="Optional repository to clone into the target when the plan has no artifacts or files are missing.",
+    ),
     force: bool = typer.Option(
         False, "--force", "-f", help="Overwrite existing alias without prompting"
     ),
@@ -609,6 +774,8 @@ def main(
       • --manifest/--from lets you provide a manifest inline when Hub lacks source_url.
       • Resolver prefers the namespace the user typed (tool:/mcp_server:/server:),
         falling back to mcp_server.
+      • --runner-url and --repo-url let you fetch a runner.json and optionally clone code
+        even when the Hub plan doesn't include them (works today, no Hub change required).
 
     Exit codes:
       0  success
@@ -686,6 +853,8 @@ def main(
                     provenance_url=src_url,
                     target=target,
                     alias=alias,
+                    runner_url=runner_url,  # NEW
+                    repo_url=repo_url,      # NEW
                 )
             except Exception as e:
                 if _is_dns_or_conn_failure(e):
@@ -705,6 +874,8 @@ def main(
                             provenance_url=src_url,
                             target=target,
                             alias=alias,
+                            runner_url=runner_url,  # NEW
+                            repo_url=repo_url,      # NEW
                         )
                     except Exception:
                         raise
@@ -713,7 +884,15 @@ def main(
         else:
             # legacy/default path — requires Hub to have a source_url recorded
             try:
-                _build_via_safe_plan(client, installer, fqid, target=target, alias=alias)
+                _build_via_safe_plan(
+                    client,
+                    installer,
+                    fqid,
+                    target=target,
+                    alias=alias,
+                    runner_url=runner_url,  # NEW
+                    repo_url=repo_url,      # NEW
+                )
             except Exception as e:
                 if _is_dns_or_conn_failure(e):
                     try:
@@ -725,7 +904,13 @@ def main(
                         )
                         fb_installer = LocalInstaller(fb_client)
                         _build_via_safe_plan(
-                            fb_client, fb_installer, fqid, target=target, alias=alias
+                            fb_client,
+                            fb_installer,
+                            fqid,
+                            target=target,
+                            alias=alias,
+                            runner_url=runner_url,  # NEW
+                            repo_url=repo_url,      # NEW
                         )
                     except Exception:
                         raise

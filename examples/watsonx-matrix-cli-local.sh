@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # ----------------------------------------------------------------------------
-# Watsonx.ai ⚡ Matrix CLI — WOW Demo (process runner) [REFACTORED FOR API HUB]
+# Watsonx.ai ⚡ Matrix CLI — WOW Demo (process runner) [HARDENED & REFACTORED]
 #
-# This script is hardened and simplified for use with the public Matrix Hub API.
+# Combines robust practices from the successful demo run:
 #  - Fails fast if local .env credentials are not found.
 #  - Copies .env into the runner directory for stable restarts.
 #  - Starts the agent on a deterministic port for reliability.
@@ -19,12 +19,12 @@ err()  { printf "${C_RED}✗ %s${C_RESET}\n" "$*" >&2; }
 cmd()  { printf "${C_GREEN}$ %s${C_RESET}\n" "$*" >&2; "$@"; }
 
 # --- Demo Parameters (env-overridable) ---
-HUB="${HUB:-https://api.matrixhub.io}"
+HUB="${HUB:-http://localhost:443}"
 ALIAS="${ALIAS:-watsonx-chat}"
 FQID="${FQID:-mcp_server:watsonx-agent@0.1.0}"
 RUNNER_URL="${RUNNER_URL:-https://raw.githubusercontent.com/ruslanmv/watsonx-mcp/refs/heads/master/runner.json}"
 REPO_URL="${REPO_URL:-https://github.com/ruslanmv/watsonx-mcp.git}"
-QUESTION="${QUESTION:-Tell me about Genoa, my current location}"
+QUESTION="${QUESTION:-Tell me about the history of Genoa}"
 DEMO_PORT="${DEMO_PORT:-6288}"
 READY_MAX_WAIT="${READY_MAX_WAIT:-90}"
 
@@ -32,7 +32,6 @@ READY_MAX_WAIT="${READY_MAX_WAIT:-90}"
 MATRIX_HOME="${MATRIX_HOME:-$HOME/.matrix}"
 RUN_DIR="${MATRIX_HOME}/runners/${ALIAS}/${FQID##*@}"
 command -v matrix >/dev/null 2>&1 || { err "matrix CLI not found in PATH"; exit 1; }
-export MATRIX_BASE_URL="${HUB}"
 
 # --- Cleanup on Exit ---
 cleanup() {
@@ -45,9 +44,8 @@ trap cleanup EXIT INT TERM
 
 # --- Banner ---
 printf "\n${C_CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}\n"
-printf   "${C_CYAN}  Watsonx.ai × Matrix Hub — Refactored API Demo${C_RESET}\n"
+printf   "${C_CYAN}  Watsonx.ai × Matrix Hub — Refactored Demo${C_RESET}\n"
 printf   "${C_CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}\n"
-echo "  Hub:   ${HUB}"
 echo "  Alias: ${ALIAS}"
 echo "  FQID:  ${FQID}"
 echo "  Port:  ${DEMO_PORT}"
