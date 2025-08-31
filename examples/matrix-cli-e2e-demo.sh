@@ -1,136 +1,145 @@
 #!/usr/bin/env bash
-# ----------------------------------------------------------------------------
-# Watsonx.ai ⚡ Matrix CLI — Simplified WOW Demo (hardened)
-# - Forces a deterministic port so the app + runtime agree
-# - Copies .env into the runner dir so restarts preserve creds
-# - Probes by URL to avoid alias/port drift
-# ----------------------------------------------------------------------------
+# examples/ingest_watsonx_demo_v2.sh
+# ──────────────────────────────────────────────────────────────────────────────
+# MatrixHub Ingestion PoC (v2) — Install, Run, and Query (prints commands)
+# - Uses a direct runner.json for faster, more reliable installation.
+# - Starts on a fixed port and uses a robust multi-probe readiness check.
+# - Copies credentials for stability and adds automatic cleanup.
+# ──────────────────────────────────────────────────────────────────────────────
 set -Eeuo pipefail
 
-# --- Pretty logs ---
-C_CYAN="\033[1;36m"; C_GREEN="\033[1;32m"; C_YELLOW="\033[1;33m"; C_RED="\033[1;31m"; C_RESET="\033[0m"
-log()  { printf "\n${C_CYAN}▶ %s${C_RESET}\n" "$*"; }
-ok()   { printf "${C_GREEN}✓ %s${C_RESET}\n" "$*"; }
-warn() { printf "${C_YELLOW}! %s${C_RESET}\n" "$*"; }
-err()  { printf "${C_RED}✗ %s${C_RESET}\n" "$*" >&2; }
-cmd()  { printf "${C_GREEN}$ %s${C_RESET}\n" "$*" >&2; "$@"; }
+# ===== Matrix-style colors =====
+C0="\033[0m"
+C_HEAD="\033[38;5;48m"
+C_DIM="\033[2m"
+C_GREEN="\033[38;5;82m"
+C_OK="\033[1;38;5;82m"
+C_WARN="\033[1;38;5;214m"
+C_ERR="\033[1;38;5;196m"
+C_BOLD="\033[1m"
 
-# --- Demo params (env-overridable) ---
-HUB="${HUB:-http://localhost:443}"
-ALIAS="${ALIAS:-watsonx-chat}"
+hr() { printf "${C_DIM}────────────────────────────────────────────────────────${C0}\n"; }
+say() { printf "• %s\n" "$*"; }
+ok() { printf "${C_OK}✓ %s${C0}\n" "$*"; }
+warn() { printf "${C_WARN}⚠ %s${C0}\n" "$*"; }
+die() {
+    printf "\n${C_ERR}✗ %s${C0}\n" "$*" >&2
+    printf "${C_DIM}--- Recent Logs ---\n" >&2
+    # Indent logs slightly for readability
+    matrix logs "$ALIAS" 2>/dev/null | tail -n 80 | sed 's/^/  /' >&2 || true
+    exit 1
+}
+title() { printf "\n${C_HEAD}${C_BOLD}▮ %s ▮${C0}\n" "$*"; }
+
+# Print and run command
+run() {
+    printf "${C_GREEN}$ %s${C0}\n" "$(printf '%q ' "$@")"
+    "$@"
+}
+
+# ===== Config (override with env) =====
+HUB="${HUB:-https://api.matrixhub.io}"
 FQID="${FQID:-mcp_server:watsonx-agent@0.1.0}"
+ALIAS="${ALIAS:-watsonx-agent}"
+
+# ✨ FIX: Use the official runner config for simplicity and performance
 RUNNER_URL="${RUNNER_URL:-https://raw.githubusercontent.com/ruslanmv/watsonx-mcp/refs/heads/master/runner.json}"
 REPO_URL="${REPO_URL:-https://github.com/ruslanmv/watsonx-mcp.git}"
-QUESTION="${QUESTION:-Tell me about Genoa, Italy}"
 
-# Force a deterministic port so Matrix runtime and the app agree.
-# Your app will mirror PORT -> WATSONX_AGENT_PORT in its launcher.
-DEMO_PORT="${DEMO_PORT:-6288}"
-
-# Maximum seconds to wait for readiness
+# ✨ FIX: Force a deterministic port to avoid mismatches
+PORT="${PORT:-6288}"
+QUESTION="${QUESTION:-Tell me about Genoa, a historic port city in Italy.}"
 READY_MAX_WAIT="${READY_MAX_WAIT:-90}"
 
-# Respect MATRIX_HOME if set; otherwise default
+# ===== Deps =====
+need() { command -v "$1" >/dev/null 2>&1 || die "Missing command: $1"; }
+need curl
+need matrix
+need awk
+need grep
+
+# ===== Paths =====
 MATRIX_HOME="${MATRIX_HOME:-$HOME/.matrix}"
-RUN_DIR="${MATRIX_HOME}/runners/${ALIAS}/${FQID##*@}"
+AGENT_ID="$(printf "%s" "$FQID" | sed -n 's/^mcp_server:\([^@]*\)@.*/\1/p')"
+VERSION="$(printf "%s" "$FQID" | sed -n 's/.*@\([0-9][^ ]*\)$/\1/p')"
+RUN_DIR="${MATRIX_HOME}/runners/${AGENT_ID}/${VERSION}"
+ENV_FILE_DEST="${RUN_DIR}/.env"
 
-# Ensure matrix CLI exists (fixed redirection)
-command -v matrix >/dev/null 2>&1 || { err "matrix CLI not found in PATH"; exit 1; }
-
-# --- Cleanup on exit ---
+# ===== Automatic Cleanup =====
+# ✨ FIX: Ensure agent is stopped/uninstalled on script exit
 cleanup() {
-  log "Cleaning up..."
-  matrix stop "$ALIAS" >/dev/null 2>&1 || true
-  matrix uninstall "$ALIAS" -y >/dev/null 2>&1 || true
-  ok "Cleanup complete."
+    say "Cleaning up..."
+    matrix stop "$ALIAS" >/dev/null 2>&1 || true
+    matrix uninstall "$ALIAS" -y >/dev/null 2>&1 || true
 }
 trap cleanup EXIT INT TERM
 
-# --- Banner ---
-printf "\n${C_CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}\n"
-printf   "${C_CYAN}  Watsonx.ai × Matrix Hub — Simplified Demo${C_RESET}\n"
-printf   "${C_CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}\n"
-echo "  Alias: ${ALIAS}"
-echo "  FQID:  ${FQID}"
+# ===== Banner =====
+title "MatrixHub Ingestion PoC"
+say "Hub:        ${HUB}"
+say "FQID/Alias: ${FQID} / ${ALIAS}"
+say "Port:       ${PORT}"
+hr
 
-# --- 1) Credentials ---
-log "Checking for WatsonX Credentials"
-if [[ ! -f ".env" ]]; then
-  err "Credentials not found."
-  printf >&2 "Please create a '.env' file in this directory with your WatsonX credentials.\n"
-  printf >&2 "Example:\n"
-  printf >&2 "${C_GREEN}  WATSONX_API_KEY=...\n  WATSONX_URL=...\n  WATSONX_PROJECT_ID=...\n${C_RESET}"
-  exit 1
+# ===== 1) Credentials =====
+title "Check and stage watsonx credentials"
+if [ ! -f ".env" ]; then
+    die "Create .env with WATSONX_API_KEY, WATSONX_URL, WATSONX_PROJECT_ID"
 fi
+# ✨ FIX: Copy .env into the runner directory for stability
+mkdir -p "$RUN_DIR"
+cp -f ".env" "$ENV_FILE_DEST"
+ok "Credentials staged for the runner at $ENV_FILE_DEST"
 
-# Export creds into the shell so initial run picks them up
-set -a
-# shellcheck disable=SC1091
-source .env
-set +a
-ok "Credentials loaded from local .env file."
-
-# --- 2) Install the Agent ---
-log "Installing the WatsonX Agent"
-cmd matrix install "$FQID" \
-  --alias "$ALIAS" \
-  --hub "$HUB" \
-  --runner-url "$RUNNER_URL" \
-  --repo-url "$REPO_URL" \
-  --force --no-prompt
+# ===== 2) Install Agent (Simplified) =====
+title "Install agent from manifest"
+# ✨ FIX: Greatly simplified installation using the official runner.json
+run matrix install "$FQID" \
+    --alias "$ALIAS" \
+    --hub "$HUB" \
+    --runner-url "$RUNNER_URL" \
+    --repo-url "$REPO_URL" \
+    --force --no-prompt
 ok "Installation complete."
 
-# Ensure runner dir exists and copy .env into it so restarts keep credentials
-mkdir -p "$RUN_DIR"
-if [[ -f "$RUN_DIR/.env" ]]; then
-  warn "Runner .env already exists at $RUN_DIR/.env — leaving it as-is."
-else
-  cp -f .env "$RUN_DIR/.env"
-  ok "Copied credentials into $RUN_DIR/.env for stable restarts."
-fi
+# ===== 3) Start Server =====
+title "Start server & wait for readiness"
+run matrix run "$ALIAS" --port "${PORT}"
 
-# --- 3) Start the Agent on a known port ---
-log "Starting the agent server in the background (port ${DEMO_PORT})"
-cmd matrix run "$ALIAS" --port "${DEMO_PORT}"
-
-BASE_URL="http://127.0.0.1:${DEMO_PORT}"
+BASE_URL="http://127.0.0.1:${PORT}"
 SSE_URL="${BASE_URL}/sse/"
 HEALTH_URL="${BASE_URL}/health"
 
-# --- 4) Wait for readiness ---
-log "Waiting for server to become ready (up to ${READY_MAX_WAIT}s)"
-# First: quick health probe loop (fast fail if port mismatch)
+# ✨ FIX: More robust readiness check from your reference code
+say "Waiting up to ${READY_MAX_WAIT}s for server at ${HEALTH_URL}..."
 deadline=$(( $(date +%s) + READY_MAX_WAIT ))
-ready=0
+is_ready=0
 while (( $(date +%s) < deadline )); do
-  if curl -fsS --max-time 2 "$HEALTH_URL" >/dev/null 2>&1; then
-    ready=1
-    break
-  fi
-  # Secondary probe via MCP (URL-based to avoid alias/port drift)
-  if matrix mcp probe --url "$SSE_URL" --timeout 3 >/dev/null 2>&1; then
-    ready=1
-    break
-  fi
-  # If the process died, dump logs and bail
-  if ! matrix ps --plain 2>/dev/null | awk '{print $1}' | grep -qx "$ALIAS"; then
-    err "Server process for '$ALIAS' is not running. Showing recent logs:"
-    matrix logs "$ALIAS" 2>/dev/null | tail -n 80 || true
-    exit 3
-  fi
-  sleep 2
+    # Primary check: health endpoint
+    if curl -fsS --max-time 2 "$HEALTH_URL" >/dev/null 2>&1; then
+        is_ready=1
+        break
+    fi
+    # Secondary check: MCP probe
+    if matrix mcp probe --url "$SSE_URL" --timeout 3 >/dev/null 2>&1; then
+        is_ready=1
+        break
+    fi
+    # Sanity check: ensure the process is still running
+    if ! matrix ps --plain 2>/dev/null | awk '{print $1}' | grep -qx "$ALIAS"; then
+        die "Server process for '$ALIAS' is not running."
+    fi
+    sleep 2
 done
 
-if (( ! ready )); then
-  err "Timed out waiting for readiness. Recent logs:"
-  matrix logs "$ALIAS" 2>/dev/null | tail -n 120 || true
-  exit 3
+if (( ! is_ready )); then
+    die "Timed out waiting for server readiness."
 fi
-ok "Server is ready! (${SSE_URL})"
+ok "Server is ready at ${SSE_URL}"
 
-# --- 5) Ask a question ---
-log "Asking WatsonX: \"$QUESTION\""
-cmd matrix mcp call chat --url "$SSE_URL" --args "{\"query\":\"${QUESTION//\"/\\\"}\"}"
+# ===== 4) Probe & Call =====
+title "Probe & call (SSE)"
+run matrix mcp call chat --url "$SSE_URL" --args "{\"query\":\"${QUESTION//\"/\\\"}\"}"
 
-ok "Demo complete! ✨"
-exit 0
+ok "Done."
+# The cleanup trap will run automatically on exit
