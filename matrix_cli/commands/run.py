@@ -143,6 +143,123 @@ def _compose_probe_url(base_url: str, endpoint: str) -> str:
         return f"{base_url.rstrip('/')}{endpoint}"
 
 
+# ---- additive: zero-latency quickstart banner helpers ---------------------- #
+_PREFERRED_DEFAULT_INPUT_KEYS = ("x-default-input", "query", "prompt", "text", "input", "message")
+
+
+def _load_runner_json(target_path: str | None) -> dict:
+    if not target_path:
+        return {}
+    try:
+        p = Path(target_path).expanduser() / "runner.json"
+        if p.is_file():
+            data = json.loads(p.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+    except Exception:
+        pass
+    return {}
+
+
+def _infer_default_input_key_from_schema(schema: dict | None) -> str | None:
+    schema = schema or {}
+    # 1) explicit
+    x = schema.get("x-default-input")
+    if isinstance(x, str) and x:
+        return x
+    props = schema.get("properties") or {}
+    req = schema.get("required") or []
+    # 2) common keys
+    for k in _PREFERRED_DEFAULT_INPUT_KEYS[1:]:
+        if k in props:
+            return k
+    # 3) one required string
+    if isinstance(req, list) and len(req) == 1:
+        rk = req[0]
+        t = (props.get(rk) or {}).get("type") if isinstance(props.get(rk), dict) else None
+        if t in (None, "string"):
+            return rk
+    # 4) one string prop overall
+    if isinstance(props, dict):
+        sk = [k for k, v in props.items() if isinstance(v, dict) and v.get("type") in (None, "string")]
+        if len(sk) == 1:
+            return sk[0]
+    return None
+
+
+def _extract_candidate_schemas(data: dict) -> list[dict]:
+    """Best-effort: pluck any embedded schema-like dicts from runner.json.
+    Keeps this tiny and fast; no recursion beyond a couple obvious spots.
+    """
+    out: list[dict] = []
+    if not isinstance(data, dict):
+        return out
+
+    # Direct fields
+    for k in ("input_schema", "schema"):
+        v = data.get(k)
+        if isinstance(v, dict):
+            out.append(v)
+
+    # transport/sse blocks
+    for sec in ("transport", "sse"):
+        v = data.get(sec)
+        if isinstance(v, dict):
+            for k in ("input_schema", "schema"):
+                sv = v.get(k)
+                if isinstance(sv, dict):
+                    out.append(sv)
+
+    # tools list (if present)
+    tools = data.get("tools")
+    if isinstance(tools, list):
+        for t in tools[:6]:  # cap small for speed
+            if isinstance(t, dict):
+                for k in ("input_schema", "schema"):
+                    sv = t.get(k)
+                    if isinstance(sv, dict):
+                        out.append(sv)
+
+    return out
+
+
+def _infer_quickstart_lines(alias: str, target_path: str | None, endpoint: str) -> list[str]:
+    data = _load_runner_json(target_path)
+    is_mcp = _is_mcp_sse_runner(data) or endpoint.rstrip("/").endswith("/sse")
+    if not is_mcp:
+        return []  # non-MCP: don't add extra banner
+
+    # Try find any schema hints
+    schemas = _extract_candidate_schemas(data)
+
+    # No-input: if any schema has no props/required
+    for sch in schemas:
+        props = sch.get("properties") or {}
+        req = sch.get("required") or []
+        if not props and not req:
+            return [
+                "Next steps:",
+                f"• Run it now:      matrix do {alias}",
+                f"• See details:     matrix help {alias}",
+            ]
+
+    # Single-string: if any schema yields a default input key
+    for sch in schemas:
+        dk = _infer_default_input_key_from_schema(sch)
+        if dk:
+            return [
+                "Next steps:",
+                f"• One-shot:        matrix do {alias} \"Example input\"",
+                f"• See arguments:   matrix help {alias}",
+            ]
+
+    # Fallback general guidance (complex / multi-tool / no clear schema)
+    return [
+        "Next steps:",
+        f"• See arguments:   matrix help {alias}",
+        f"• Guided call:     matrix mcp call <tool> --alias {alias} --wizard",
+    ]
+
+
 @app.command()
 def main(
     alias: str,
@@ -235,9 +352,20 @@ def main(
                 pass
         probe_url = _compose_probe_url(base_url, endpoint)
 
-    # Show quick next steps in both alias and URL forms
+    # Show quick next steps in both alias and URL forms (keep as-is)
     info("—")
     info("Next steps (MCP):")
     info(f"• Probe via alias: matrix mcp probe --alias {alias}")
     info(f"• Or via URL:      matrix mcp probe --url {probe_url}")
     info(f"• Call a tool:     matrix mcp call <tool> --alias {alias} --args '{{}}'")
+
+    # ---- Additive: zero-latency smart quickstart banner ------------------- #
+    try:
+        lines = _infer_quickstart_lines(alias, target, endpoint)
+        if lines:
+            info("")
+            for ln in lines:
+                info(ln)
+    except Exception:
+        # Never fail the run output on banner heuristics
+        pass

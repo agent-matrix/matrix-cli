@@ -6,9 +6,10 @@ import difflib
 import json
 import logging
 import os
+import sys
 from dataclasses import asdict as _dc_asdict, is_dataclass as _dc_is_dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple, List
+from typing import Any, Dict, Optional, Tuple, List, Iterable
 
 import typer
 
@@ -399,9 +400,102 @@ def _final_url_from_inputs(
     raise ValueError("Provide --url OR --alias (optionally with --port).")
 
 
+# --------------------------- enhanced args helpers -------------------------- #
+_PREFERRED_DEFAULT_INPUT_KEYS: Tuple[str, ...] = (
+    "x-default-input",
+    "query",
+    "prompt",
+    "text",
+    "input",
+    "message",
+)
+
+
+def _infer_default_input_key(schema: Dict[str, Any] | None) -> Optional[str]:
+    """Infer a sensible default input key from a JSON Schema-like dict."""
+    schema = schema or {}
+    # explicit hint
+    explicit = schema.get("x-default-input")
+    if isinstance(explicit, str) and explicit:
+        return explicit
+
+    props = (schema.get("properties") or {}) if isinstance(schema, dict) else {}
+    req = schema.get("required") or []
+
+    # conventional keys
+    for k in _PREFERRED_DEFAULT_INPUT_KEYS[1:]:
+        if k in props:
+            return k
+
+    # single required string
+    if isinstance(req, (list, tuple)) and len(req) == 1:
+        rk = req[0]
+        t = (props.get(rk) or {}).get("type") if isinstance(props.get(rk), dict) else None
+        if t in (None, "string"):
+            return rk
+
+    # single string property overall
+    if isinstance(props, dict):
+        string_keys = [k for k, v in props.items() if isinstance(v, dict) and v.get("type") in (None, "string")]
+        if len(string_keys) == 1:
+            return string_keys[0]
+
+    return None
+
+
+def _parse_kv_pairs(kv_list: Optional[List[str]]) -> Dict[str, Any]:
+    """Parse --kv key=value pairs with light coercion (bool/int/float)."""
+    out: Dict[str, Any] = {}
+    if not kv_list:
+        return out
+    for pair in kv_list:
+        if not pair or "=" not in pair:
+            continue
+        k, v = pair.split("=", 1)
+        k = k.strip()
+        v = v.strip()
+        # coerce bool/int/float when obvious
+        vl = v.lower()
+        if vl in {"true", "false"}:
+            out[k] = (vl == "true")
+            continue
+        try:
+            if "." in v:
+                out[k] = float(v)
+            else:
+                out[k] = int(v)
+            continue
+        except Exception:
+            pass
+        out[k] = v
+    return out
+
+
+def _lenient_json_parse(s: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """Conservative lenient JSON: try single-quote to double-quote replacement only."""
+    try:
+        return json.loads(s), None
+    except Exception:
+        pass
+    # conservative: replace single quotes with double quotes if it looks like simple JSON
+    if s.count("'") >= 2 and '"' not in s:
+        try:
+            fixed = s.replace("'", '"')
+            obj = json.loads(fixed)
+            if isinstance(obj, dict):
+                return obj, None
+        except Exception:
+            return None, "Invalid JSON for --args. Try --wizard, --text or --kv."
+    return None, "Invalid JSON for --args. Try --wizard, --text or --kv."
+
+
 def _read_args_json(args_json: Optional[str]) -> Tuple[Dict[str, Any], Optional[str]]:
     """
-    Parse the --args value. Supports plain JSON or @path to read from file.
+    Parse the --args value. Supports:
+      • inline JSON
+      • @path.json
+      • @path.yaml | @path.yml   (if PyYAML installed)
+      • @-  (stdin)
     Returns (parsed_dict, error_message_or_None).
     """
     if not args_json:
@@ -409,11 +503,32 @@ def _read_args_json(args_json: Optional[str]) -> Tuple[Dict[str, Any], Optional[
     try:
         s = args_json.strip()
         if s.startswith("@"):
-            path = Path(s[1:]).expanduser()
-            content = path.read_text(encoding="utf-8")
-            obj = json.loads(content)
+            path = s[1:].strip()
+            if path == "-":
+                content = sys.stdin.read()
+                obj = json.loads(content)
+            else:
+                p = Path(path).expanduser()
+                content = p.read_text(encoding="utf-8")
+                if p.suffix.lower() in {".yaml", ".yml"}:
+                    try:
+                        import yaml  # type: ignore
+                    except Exception:
+                        return {}, (
+                            "YAML not available. Install optional extra: `pip install matrix-cli[yaml]`"
+                        )
+                    obj = yaml.safe_load(content)  # type: ignore
+                else:
+                    obj = json.loads(content)
         else:
-            obj = json.loads(s)
+            # strict first
+            try:
+                obj = json.loads(s)
+            except Exception:
+                # lenient fallback (very conservative)
+                obj, err = _lenient_json_parse(s)
+                if err:
+                    return {}, err
         if not isinstance(obj, dict):
             return {}, "--args must be a JSON object (e.g. '{}')"
         return obj, None
@@ -452,9 +567,14 @@ async def _probe_async(
     call_tool: Optional[str],
     args_json: Optional[str],
     timeout: float,
+    *,
+    wizard: bool = False,
+    text_arg: Optional[str] = None,
+    kv_pairs: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
     Connect, initialize, list tools, optionally call a tool, and return a structured report.
+    Extended to build call arguments from --wizard / --text / --kv without extra connections.
     """
     # Import the base session first (mcp is required either way)
     try:
@@ -492,7 +612,7 @@ async def _probe_async(
     else:
         return {"ok": False, "reason": f"Unsupported URL scheme for MCP: {url}"}
 
-    # Parse args for an optional call
+    # Parse args for an optional call (strict/lenient/file/yaml/stdin)
     call_args, err = _read_args_json(args_json)
     if err:
         return {"ok": False, "reason": err}
@@ -502,22 +622,72 @@ async def _probe_async(
         async with transport_ctx as (read_stream, write_stream):
             async with ClientSession(read_stream, write_stream) as session:
                 init_result = await session.initialize()
-                tools = await session.list_tools()
+                tools_resp = await session.list_tools()
+                tools = getattr(tools_resp, "tools", [])
 
                 report: Dict[str, Any] = {
                     "ok": True,
                     "url": url,
                     "initialized": True,
                     "init": _to_jsonable(init_result),
-                    "tools": [t.name for t in getattr(tools, "tools", [])],
+                    "tools": [t.name for t in tools],
                     "call": None,
                 }
 
                 if call_tool:
+                    # Locate tool object (case-sensitive first, then insensitive)
+                    tool_obj = None
+                    for t in tools:
+                        if getattr(t, "name", None) == call_tool:
+                            tool_obj = t
+                            break
+                    if tool_obj is None:
+                        for t in tools:
+                            if str(getattr(t, "name", "")).strip().casefold() == call_tool.strip().casefold():
+                                tool_obj = t
+                                break
+                    if tool_obj is None:
+                        report["ok"] = False
+                        report["call"] = {
+                            "tool": call_tool,
+                            "args": call_args,
+                            "error": f"Tool '{call_tool}' not found on server.",
+                        }
+                        return report
+
+                    # Build arguments if not provided
+                    if not call_args and (wizard or text_arg is not None or (kv_pairs and len(kv_pairs) > 0)):
+                        schema = getattr(tool_obj, "input_schema", None) or getattr(tool_obj, "inputSchema", None) or {}
+                        # Start from kv pairs
+                        args_from_kv = _parse_kv_pairs(kv_pairs)
+                        built: Dict[str, Any] = {}
+
+                        # Wizard prompts (top-level props only)
+                        if wizard:
+                            built = _prompt_from_schema(schema)
+
+                        # Map text to default key (without overwriting explicit values)
+                        if text_arg is not None:
+                            dk = _infer_default_input_key(schema)
+                            if dk:
+                                built.setdefault(dk, text_arg)
+                            else:
+                                # Fallback: single property schema
+                                props = (schema.get("properties") or {}) if isinstance(schema, dict) else {}
+                                if len(props) == 1:
+                                    only_key = next(iter(props.keys()))
+                                    built.setdefault(only_key, text_arg)
+                                else:
+                                    return {
+                                        "ok": False,
+                                        "reason": "This tool requires structured input and no default text field is defined.",
+                                    }
+
+                        # Merge precedence: wizard > kv (user intent) > file/args_json (already empty here)
+                        call_args = {**args_from_kv, **built}
+
                     try:
-                        resp = await session.call_tool(
-                            name=call_tool, arguments=call_args
-                        )
+                        resp = await session.call_tool(name=call_tool, arguments=call_args)
                         content = getattr(resp, "content", [])
                         report["call"] = {
                             "tool": call_tool,
@@ -544,9 +714,23 @@ def _run_probe_and_render(
     args: Optional[str],
     timeout: float,
     json_out: bool,
+    *,
+    wizard: bool = False,
+    text_arg: Optional[str] = None,
+    kv_pairs: Optional[List[str]] = None,
 ) -> None:
     try:
-        report = asyncio.run(_probe_async(final_url, call, args, timeout))
+        report = asyncio.run(
+            _probe_async(
+                final_url,
+                call,
+                args,
+                timeout,
+                wizard=wizard,
+                text_arg=text_arg,
+                kv_pairs=kv_pairs,
+            )
+        )
     except KeyboardInterrupt:
         typer.echo("Interrupted.", err=True)
         raise typer.Exit(130)
@@ -582,6 +766,103 @@ def _run_probe_and_render(
                     typer.echo(f"- {c.get('type')}: {c.get('repr', '')}")
 
     raise typer.Exit(0)
+
+
+# ------------------------------ wizard prompt ------------------------------ #
+def _prompt_from_schema(schema: Dict[str, Any] | None) -> Dict[str, Any]:
+    """Minimal interactive prompt: string/number/integer/boolean/enum.
+    Arrays/objects require pasting JSON. Depth limited to top-level properties.
+    """
+    out: Dict[str, Any] = {}
+    schema = schema or {}
+    props = schema.get("properties") or {}
+    required = set(schema.get("required") or [])
+
+    if not isinstance(props, dict):
+        return out
+
+    for name, spec in props.items():
+        if not isinstance(spec, dict):
+            continue
+        typ = (spec.get("type") or "string").lower() if isinstance(spec.get("type"), str) else str(spec.get("type") or "string")
+        enum = spec.get("enum") if isinstance(spec.get("enum"), list) else None
+        default = spec.get("default") if name not in required else None
+        desc = spec.get("description") or ""
+
+        # Build help line
+        hint = f"{name} ({'|'.join(typ) if isinstance(typ, list) else typ}"
+        if enum:
+            try:
+                hint += f"; one of {', '.join(map(str, enum))}"
+            except Exception:
+                pass
+        hint += "; required)" if name in required else "; optional)"
+        if default is not None:
+            try:
+                hint += f" [default: {json.dumps(default)}]"
+            except Exception:
+                hint += " [default: <unrepr>]"
+        if desc:
+            hint += f"\n    {desc.strip()}"
+
+        while True:
+            try:
+                raw = input(f"▸ {hint}\n  → ").strip()
+            except (EOFError, KeyboardInterrupt):
+                raw = ""
+            if not raw:
+                if name in required and default is None:
+                    print("  ✖ required")
+                    continue
+                if default is not None:
+                    out[name] = default
+                break
+
+            # enum first
+            if enum:
+                if raw in map(str, enum):
+                    # try to coerce to enum type
+                    try:
+                        tgt_type = type(enum[0])
+                        out[name] = tgt_type(raw)
+                    except Exception:
+                        out[name] = raw
+                    break
+                else:
+                    print("  ✖ must be one of:", ", ".join(map(str, enum)))
+                    continue
+
+            # simple types
+            if typ == "boolean":
+                out[name] = raw.lower() in {"1", "true", "yes", "y", "on"}
+                break
+            if typ == "number":
+                try:
+                    out[name] = float(raw)
+                    break
+                except Exception:
+                    print("  ✖ expected number")
+                    continue
+            if typ == "integer":
+                try:
+                    out[name] = int(raw)
+                    break
+                except Exception:
+                    print("  ✖ expected integer")
+                    continue
+            if typ == "array" or typ == "object":
+                try:
+                    obj = json.loads(raw)
+                    out[name] = obj
+                    break
+                except Exception as e:
+                    print(f"  ✖ invalid JSON: {e}")
+                    continue
+            # default: string/any
+            out[name] = raw
+            break
+
+    return out
 
 
 # --------------------------------- commands -------------------------------- #
@@ -622,7 +903,7 @@ def probe(
     args: Optional[str] = typer.Option(
         None,
         "--args",
-        help="JSON object with arguments for --call. Example: '{}' or '@/path/to/args.json'",
+        help="JSON object with arguments for --call. Example: '{}' or '@/path/to/args.json' (also @- for stdin, and YAML if available)",
         show_default=False,
     ),
     timeout: float = typer.Option(
@@ -694,7 +975,27 @@ def call(
     args: Optional[str] = typer.Option(
         None,
         "--args",
-        help="JSON object with arguments for the tool. Example: '{}' or '@/path/to/args.json'",
+        help="JSON object with arguments for the tool. Example: '{}' or '@/path/to/args.json' (also @- for stdin, and YAML if available)",
+        show_default=False,
+    ),
+    # --- new additive flags ---
+    wizard: bool = typer.Option(
+        False,
+        "--wizard",
+        "-w",
+        help="Prompt for inputs from the tool's schema (strings/numbers/bools/enums).",
+        show_default=False,
+    ),
+    text: Optional[str] = typer.Option(
+        None,
+        "--text",
+        help="Plain text mapped to the tool's default input field (schema-aware).",
+        show_default=False,
+    ),
+    kv: List[str] = typer.Option(
+        [],
+        "--kv",
+        help="Additional key=value pairs (repeatable). Coerces bool/int/float when obvious.",
         show_default=False,
     ),
     timeout: float = typer.Option(
@@ -710,6 +1011,9 @@ def call(
       • matrix mcp call hello --alias hello-sse-server
       • matrix mcp call hello --url http://127.0.0.1:52305/messages/
       • matrix mcp call hello --alias hello-sse-server --args '{"name":"world"}'
+      • matrix mcp call hello --alias hello-sse-server --wizard
+      • matrix mcp call chat --alias hello-sse-server --text "Tell me about Genova"
+      • matrix mcp call search --alias hello-sse-server --kv q=linux --kv top_k=5
     """
     # Ensure TLS/bootstrap like the rest of the CLI
     cfg = load_config()
@@ -729,4 +1033,14 @@ def call(
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(2)
 
-    _run_probe_and_render(final_url, tool, args, timeout, json_out)
+    # Single connect path with extended arg building in-proc
+    _run_probe_and_render(
+        final_url,
+        tool,
+        args,
+        timeout,
+        json_out,
+        wizard=wizard,
+        text_arg=text,
+        kv_pairs=kv,
+    )

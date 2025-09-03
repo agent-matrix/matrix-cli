@@ -25,6 +25,34 @@ if len(sys.argv) > 1 and sys.argv[1] == "version":
         raise SystemExit(1)
     raise SystemExit(0)
 
+# ---- NEW LAZY COMMAND FAST PATHS (additive, zero startup overhead) ----
+# These paths import only the selected command module and execute it directly.
+# They keep global startup minimal while enabling the new UX commands.
+if len(sys.argv) > 1 and sys.argv[1] in {"do", "help", "chat"}:
+    cmd = sys.argv[1]
+    try:
+        if cmd == "do":
+            # Prefer module app to preserve its own option parsing & help.
+            from matrix_cli.commands.do import app as do_app  # lazy import
+            do_app(args=sys.argv[2:], prog_name="matrix do")
+        elif cmd == "help":
+            from matrix_cli.commands.help import app as help_app  # lazy import
+            help_app(args=sys.argv[2:], prog_name="matrix help")
+        else:  # cmd == "chat"
+            # chat is optional/beta; import only if present
+            try:
+                from matrix_cli.commands.chat import app as chat_app  # lazy import
+            except Exception:
+                print("Chat is not available in this build.", file=sys.stderr)
+                raise SystemExit(2)
+            chat_app(args=sys.argv[2:], prog_name="matrix chat")
+    except SystemExit:
+        raise
+    except Exception as e:
+        print(f"Error loading '{cmd}' command: {e}", file=sys.stderr)
+        raise SystemExit(1)
+    raise SystemExit(0)
+
 # ---- STANDARD COMMAND REGISTRATION ----
 from .commands import (
     alias as cmd_alias,
@@ -87,11 +115,9 @@ app.add_typer(
     hidden=True,
 )
 
-
 def main() -> None:
     """The main entry point for the CLI application."""
     app()
-
 
 if __name__ == "__main__":
     main()
