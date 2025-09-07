@@ -224,6 +224,15 @@ def _env_on(name: str) -> bool:
     v = (os.getenv(name) or "").strip().lower()
     return v in {"1", "true", "yes", "on"}
 
+def _env_on_default_true(name: str) -> bool:
+    """
+    True if env var is unset or truthy; False only if explicitly disabled (0/false/no/off).
+    """
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return True
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
 def _json_pretty(obj: Any) -> str:
     try:
         return json.dumps(obj, indent=2, ensure_ascii=False, default=str)
@@ -638,13 +647,24 @@ def _maybe_fetch_runner_and_repo(
 ) -> None:
     """
     Make installs 'just work' when Hub doesn't provide artifacts:
+
       • If --runner-url is provided: ALWAYS fetch into runner.json (backup if exists).
-      • Else if no runner.json and plan.runner_url exists: fetch it.
-      • Else if still no runner.json: try lockfile.provenance.source_url → fetch manifest.runner.
-      • If --repo-url is provided and the runner points to a missing entry file:
-         clone the repo into the target (excluding .git).
+      • Else: try plan.runner_url, then ALWAYS fetch lockfile.provenance.source_url → manifest.runner.
+      • If a connector runner already exists, replace it with a non-connector (python/node) runner
+        from the manifest when MATRIX_CLI_PREFER_MANIFEST_RUNNER (default ON).
+      • Clone repository:
+          - If --repo-url provided → use that.
+          - Else, if manifest.repository (or repositories[0]) exists and the runner’s entry file is missing → clone.
+            Respect 'subdir'/'subdirectory'/'path' if present in the manifest repo spec.
+      • Controlled by env:
+          - MATRIX_CLI_PREFER_MANIFEST_RUNNER (default: 1 / ON)
+          - MATRIX_CLI_AUTO_CLONE (default: 1 / ON)
+
     Non-fatal on failures; logs warnings.
     """
+    prefer_manifest_runner = _env_on_default_true("MATRIX_CLI_PREFER_MANIFEST_RUNNER")
+    auto_clone = _env_on_default_true("MATRIX_CLI_AUTO_CLONE")
+
     tgt_path.mkdir(parents=True, exist_ok=True)
     rpath = tgt_path / "runner.json"
 
@@ -659,12 +679,42 @@ def _maybe_fetch_runner_and_repo(
         rpath.write_text(json.dumps(obj, indent=2), encoding="utf-8")
         info(f"runner.json written → {rpath}")
 
+    def _current_runner() -> Dict[str, Any]:
+        try:
+            return json.loads(rpath.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+
+    def _first_provenance_url(rep: Dict[str, Any] | None) -> str:
+        if not isinstance(rep, dict):
+            return ""
+        try:
+            lockfile = rep.get("lockfile") or {}
+            for e in (lockfile.get("entities") or []):
+                u = ((e or {}).get("provenance") or {}).get("source_url")
+                if isinstance(u, str) and u.strip():
+                    return u.strip()
+        except Exception:
+            pass
+        return ""
+
+    def _fetch_json(url: str, timeout: int = 20) -> Dict[str, Any]:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+
+    def _manifest_repo_spec(mf: Dict[str, Any]) -> Dict[str, Any] | None:
+        repo = mf.get("repository")
+        if isinstance(repo, dict):
+            return repo
+        repos = mf.get("repositories")
+        if isinstance(repos, list) and repos and isinstance(repos[0], dict):
+            return repos[0]
+        return None
+
     # 1) Strong override: --runner-url
     if (runner_url or "").strip():
         try:
-            with urllib.request.urlopen(runner_url, timeout=15) as resp:
-                data = resp.read().decode("utf-8")
-            obj = json.loads(data)
+            obj = _fetch_json(runner_url)
             if _valid_runner_schema(obj):
                 _write_runner(obj)
             else:
@@ -672,14 +722,12 @@ def _maybe_fetch_runner_and_repo(
         except Exception as e:
             warn(f"--runner-url: failed to fetch runner.json ({e})")
 
-    # 2) No runner yet → plan.runner_url
+    # 2) Plan hint (runner_url) if we still don't have a runner
     elif not rpath.exists():
         url = _plan_runner_url(report or {})
         if url:
             try:
-                with urllib.request.urlopen(url, timeout=15) as resp:
-                    data = resp.read().decode("utf-8")
-                obj = json.loads(data)
+                obj = _fetch_json(url)
                 if _valid_runner_schema(obj):
                     _write_runner(obj)
                 else:
@@ -687,62 +735,85 @@ def _maybe_fetch_runner_and_repo(
             except Exception as e:
                 warn(f"plan.runner_url: failed to fetch runner.json ({e})")
 
-    # 3) Still no runner.json → lockfile.provenance.source_url → fetch manifest, extract 'runner'
-    if not rpath.exists() and report:
+    # 3) Manifest via lockfile provenance: ALWAYS try (even if a connector runner.json exists)
+    manifest: Dict[str, Any] | None = None
+    prov_url = _first_provenance_url(report or {})
+    if prov_url:
         try:
-            lockfile = report.get("lockfile") or {}
-            entities = lockfile.get("entities") or []
-            prov_url = None
-            for e in entities:
-                u = ((e or {}).get("provenance") or {}).get("source_url")
-                if isinstance(u, str) and u.strip():
-                    prov_url = u.strip()
-                    break
-            if prov_url:
-                with urllib.request.urlopen(prov_url, timeout=20) as resp:
-                    data = resp.read().decode("utf-8")
-                manifest = json.loads(data)
-                runner = manifest.get("runner") or {}
-                if runner and _valid_runner_schema(runner):
-                    info("Fetched manifest from lockfile.provenance; extracting runner → runner.json")
-                    _write_runner(runner)
-                else:
-                    warn("Manifest fetched via provenance but contained no valid 'runner' block.")
+            manifest = _fetch_json(prov_url)
         except Exception as e:
-            warn(f"provenance.runner: failed to extract runner from manifest ({e})")
+            warn(f"provenance.manifest: failed to fetch manifest ({e})")
 
-    # 4) Optional: clone repo
-    if (repo_url or "").strip():
-        need_clone = False
+    # If a manifest runner exists and is valid, prefer it for non-connector execution.
+    if manifest:
+        mf_runner = manifest.get("runner") or {}
+        if mf_runner and _valid_runner_schema(mf_runner):
+            cur = _current_runner()
+            cur_type = (cur.get("type") or "").strip().lower()
+            mf_type = (mf_runner.get("type") or "").strip().lower()
+            if (not rpath.exists()) or (prefer_manifest_runner and cur_type == "connector" and mf_type in {"python", "node"}):
+                info("Using runner from manifest (writing/replacing runner.json).")
+                _write_runner(mf_runner)
+
+    # 4) Clone repository if the runner requires an entry file that isn't present.
+    #    Decide URL: explicit --repo-url > manifest.repository.url/repo
+    clone_from = (repo_url or "").strip()
+    mf_repo_spec = None
+    if not clone_from and manifest:
+        mf_repo_spec = _manifest_repo_spec(manifest)
+        if isinstance(mf_repo_spec, dict):
+            clone_from = (mf_repo_spec.get("url") or mf_repo_spec.get("repo") or "").strip()
+
+    # Determine if we need code based on the (possibly replaced) runner.json
+    try:
+        runner_obj = _current_runner()
+    except Exception:
+        runner_obj = {}
+
+    rtype = (runner_obj.get("type") or "").strip().lower()
+    entry = (runner_obj.get("entry") or "").strip()
+    need_clone = bool(rtype in {"python", "node"} and (not entry or not (tgt_path / entry).exists()))
+
+    if clone_from and (need_clone and (auto_clone or bool(repo_url))):
         try:
-            obj = json.loads(rpath.read_text(encoding="utf-8")) if rpath.exists() else {}
+            with tempfile.TemporaryDirectory() as tmpd:
+                # honor branch/tag ref if present in manifest repo spec
+                clone_cmd = ["git", "clone", "--depth=1"]
+                ref = ""
+                if isinstance(mf_repo_spec, dict):
+                    ref = (mf_repo_spec.get("ref") or mf_repo_spec.get("branch") or mf_repo_spec.get("tag") or "").strip()
+                if ref and ref.upper() != "HEAD":
+                    clone_cmd += ["--branch", ref]
+                clone_cmd += [clone_from, tmpd]
+                subprocess.run(clone_cmd, check=True)
+
+                # Respect subdir if present
+                src_dir = Path(tmpd)
+                if isinstance(mf_repo_spec, dict):
+                    sub = (mf_repo_spec.get("subdir") or mf_repo_spec.get("subdirectory") or mf_repo_spec.get("path") or "").strip()
+                    if sub:
+                        src_dir = src_dir / sub
+
+                for p in src_dir.iterdir():
+                    if p.name == ".git":
+                        continue
+                    dest = tgt_path / p.name
+                    if p.is_dir():
+                        shutil.copytree(p, dest, dirs_exist_ok=True)
+                    else:
+                        shutil.copy2(p, dest)
+            info(f"Repository cloned into {tgt_path}")
+        except Exception as e:
+            warn(f"repo clone: failed to clone into target ({e})")
+
+    # 5) If repo provided a runner.json, prefer it when current runner is invalid
+    if not _valid_runner_schema(_current_runner()):
+        try:
+            obj = _current_runner()
+            if _valid_runner_schema(obj):
+                info("Loaded runner from repository.")
         except Exception:
-            obj = {}
-
-        t = (obj.get("type") or "").strip().lower()
-        entry = (obj.get("entry") or "").strip()
-        if t in {"python", "node"}:
-            if not entry or not (tgt_path / entry).exists():
-                need_clone = True
-        else:
-            # connector/no entry — allow clone if asked
-            need_clone = True
-
-        if need_clone:
-            try:
-                with tempfile.TemporaryDirectory() as tmpd:
-                    subprocess.run(["git", "clone", "--depth=1", repo_url, tmpd], check=True)
-                    for p in Path(tmpd).iterdir():
-                        if p.name == ".git":
-                            continue
-                        dest = tgt_path / p.name
-                        if p.is_dir():
-                            shutil.copytree(p, dest, dirs_exist_ok=True)
-                        else:
-                            shutil.copy2(p, dest)
-                info(f"Repository cloned into {tgt_path}")
-            except Exception as e:
-                warn(f"--repo-url: failed to clone into target ({e})")
+            pass
 
 # ----------------------------------- CLI -----------------------------------
 
@@ -789,6 +860,10 @@ def main(
       • Resolver prefers the namespace the user typed (tool:/mcp_server:/server:), falling back to mcp_server.
       • --runner-url and --repo-url let you fetch a runner.json and optionally clone code even when the plan
         doesn't include them.
+
+    Env toggles (default ON):
+      • MATRIX_CLI_PREFER_MANIFEST_RUNNER=1  — prefer manifest runner over connector
+      • MATRIX_CLI_AUTO_CLONE=1              — auto-clone repo when entry file is missing
     """
     from matrix_sdk.alias import AliasStore
     from matrix_sdk.client import MatrixClient
