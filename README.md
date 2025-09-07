@@ -6,39 +6,92 @@
 [![Python 3.11+](https://img.shields.io/pypi/pyversions/matrix-cli.svg)](https://pypi.org/project/matrix-cli/)
 [![GitHub](https://img.shields.io/badge/github-agent--matrix?logo=github)](https://github.com/agent-matrix/matrix-cli)
 [![Docs (MkDocs)](https://img.shields.io/badge/docs-mkdocs-blue?logo=mkdocs)](https://agent-matrix.github.io/matrix-cli/)
-[![License: Apache-2.0](https://img.shields.io/badge/license-Apache%202.0-blue)](./LICENSE) <a href="https://github.com/agent-matrix/matrix-hub"> <img src="https://img.shields.io/badge/Powered%20by-matrix--hub-brightgreen" alt="Powered by matrix-hub"> </a>
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache%202.0-blue)](./LICENSE) <a href="https://github.com/agent-matrix/matrix-hub"><img src="https://img.shields.io/badge/Powered%20by-matrix--hub-brightgreen" alt="Powered by matrix-hub"></a>
 
-> Requires **Python 3.11+** and **matrix-python-sdk ≥ 0.1.6**.
+> Requires **Python 3.11+** and **matrix-python-sdk ≥ 0.1.9**.
 
+---
 
+## 🌍 Why Matrix CLI
+
+Matrix CLI gets you from **discovery → install → run → interact** with agents, tools, and MCP servers — fast. Built to be secure by default, delightful for developers, and friendly for automation worldwide.
+
+---
+## 🚀 What’s new in v0.1.6
+
+Aligned with **matrix-python-sdk 0.1.9** (backwards-compatible refactor) and introduces a faster way to talk to your agents.
+
+* **✨ New:** `matrix do <alias> <prompt>` — the quickest way to interact with a running agent.
+* **Smarter runner discovery:** Auto-materializes `runner.json` from embedded b64/URL/object, embedded manifests (v1/v2), on-disk search, or inference (`server.py`, `package.json`). Synthesizes connector runners if an MCP URL is present.
+* **Safer materialization:** Writes only under your target; supports base64 files, git/http artifacts; robust logging.
+* **Faster environment prep:** Python: fresh venv + upgraded `pip/setuptools/wheel`, then `requirements.txt` or editable `pyproject.toml` / `setup.py`. Node: auto-detects **pnpm > yarn > npm**.
+* **Connector-aware run (attach mode):** If `runner.json` is a connector with an MCP SSE URL, `matrix run` attaches (no local process). `matrix stop` becomes a no-op (clears the lock).
+* **Better MCP probing & calls:** Tolerates `/sse` vs `/messages/`, clearer errors, `--json` for scripts.
+* **Idempotent installs:** Re-install same alias with `--force --no-prompt` without surprises.
+
+> Tip: `export MATRIX_SDK_DEBUG=1` for verbose installer logs.
+
+![Matrix CLI + Watsonx](assets/matrix_cli_demo_watsonx.gif)
 
 
 ---
 
-## 🚀 What’s new in v0.1.3
+## 🎬 A 5-Minute End-to-End Demo
 
-* **Connector-aware run (attach mode)**
-  If your `runner.json` has `"type": "connector"` (with an MCP SSE URL), `matrix run` records the URL and **doesn’t spawn a local process**. `matrix stop` is a no-op (clears the lock).
-* **Better MCP probing & calls**
-  CLI is more tolerant to servers exposing `/sse` vs `/messages/`. You’ll also get clearer errors and the list of exposed tools when a call fails.
-* **Safer locks & idempotent cleanup**
-  Fewer “stale lock” surprises. Re-runs cleanly unlock before retrying.
-* **Same great UX**
-  `matrix ps` still shows a **URL** column and supports **`--plain`** and **`--json`** for scripting.
-* **Security & transport hardening**
-  Consistent certificate verification (env CA / OS trust / certifi). As before, **no absolute paths** are sent to the Hub during install.
+Experience the full lifecycle with a Watsonx agent — from search to results.
 
-> Heads-up: You can now comfortably use **both** modes for your MCP servers:
->
-> 1. **Process runner** (local `python`/`node`), or
-> 2. **Connector runner** (attach to a remote/local SSE URL).
->    The CLI treats both uniformly in PS/Logs/Doctor.
+### 0) Setup
 
+Create a local `.env` with your credentials:
 
-![Matrix CLI Demo](assets/matrix_cli_demo_watsonx.gif)
+```bash
+# .env
+WATSONX_API_KEY="your_api_key_here"
+WATSONX_URL="your_url_here"
+WATSONX_PROJECT_ID="your_project_id_here"
+```
+
+### 1) 🔍 Discover
+
+```bash
+matrix search "watsonx" --type mcp_server --limit 5
+```
+
+### 2) 📦 Install
+
+```bash
+matrix install mcp_server:watsonx-agent@0.1.0 --alias watsonx-chat
+```
+
+### 3) 🚀 Run
+
+```bash
+matrix run watsonx-chat --port 6288
+# ✓ URL:   http://127.0.0.1:6288/sse
+#   Health: http://127.0.0.1:6288/health
+```
+
+### 4) ✨ Ask with **matrix do**
+
+```bash
+matrix do watsonx-chat "Tell me about Genoa"
+```
+
+### 5) ⚙️ Advanced call
+
+```bash
+matrix mcp call chat --alias watsonx-chat --args '{"query":"List three landmarks in Genoa"}'
+```
+
+### 6) 📋 Manage & clean up
+
+```bash
+matrix ps
+matrix stop watsonx-chat
+matrix uninstall watsonx-chat -y
+```
 
 ---
-
 
 ## 📦 Install
 
@@ -56,13 +109,13 @@ pip install matrix-cli
 # Add MCP client (SSE works; WebSocket needs `websockets`)
 pip install "matrix-cli[mcp]"   # installs mcp>=1.13.1
 
-# If you want WebSocket probing too:
+# If you also want WebSocket probing:
 pip install websockets
 
 # Dev extras (linting, tests, docs)
 pip install "matrix-cli[dev]"
 
-# Using pipx? You can inject extras later:
+# Using pipx? Inject extras later:
 pipx inject matrix-cli mcp websockets
 ```
 
@@ -86,6 +139,9 @@ export REQUESTS_CA_BUNDLE=/path/to/ca.pem
 
 # ps URL host override (display only)
 export MATRIX_PS_HOST="localhost"
+
+# Installer / builder verbosity (SDK ≥ 0.1.9)
+export MATRIX_SDK_DEBUG=1
 ```
 
 ### Optional TOML (`~/.config/matrix/cli.toml`)
@@ -114,8 +170,11 @@ matrix search "hello" --type mcp_server --limit 5
 # Install (short name resolves to mcp_server:<name>@<latest>)
 matrix install hello-sse-server --alias hello-sse-server
 
-# Run and inspect
+# Run and interact
 matrix run hello-sse-server
+matrix do hello-sse-server "What is Matrix CLI?"
+
+# Inspect
 matrix ps                                # shows URL column
 matrix logs hello-sse-server -f
 matrix stop hello-sse-server
@@ -128,9 +187,10 @@ matrix connection
 matrix connection --json --timeout 3.0
 ```
 
-## Matrix CLI Demo
+**Demo GIFs**
 
 ![Matrix CLI Demo](assets/matrix-cli-demo.gif)
+
 
 ---
 
@@ -161,18 +221,18 @@ matrix search "watsonx" --mode hybrid --with-snippets
 matrix search "sql agent" --capabilities rag,sql --json
 ```
 
-> If the public Hub is unreachable, some operations try a **local dev Hub** once and tell you.
+If the public Hub is unreachable, some operations try a **local dev Hub** once and tell you.
 
 ---
 
 ## 🧩 Install behavior (safer by design)
 
-* Accepts `name`, `name@ver`, `ns:name`, `ns:name@ver`
-* If `ns` missing, prefers **`mcp_server`**
-* If `@version` missing, picks **latest** (stable > pre-release)
-* Uses a small cache under `~/.matrix/cache/resolve.json` (per-hub, short TTL)
-* **No absolute paths sent to the Hub** — the CLI sends a safe `<alias>/<version>` label, then **materializes locally**
-* Preflight checks ensure your local target is **writable** before network calls
+* Accepts `name`, `name@ver`, `ns:name`, `ns:name@ver`.
+* If `ns` missing, prefers **`mcp_server`**.
+* If `@version` missing, picks **latest** (stable > pre-release).
+* Uses a small cache under `~/.matrix/cache/resolve.json` (per-hub, short TTL).
+* **No absolute paths sent to the Hub** — the CLI sends a safe `<alias>/<version>` label, then **materializes locally**.
+* Preflight checks ensure your local target is **writable** before network calls.
 
 Examples:
 
@@ -189,24 +249,26 @@ matrix install hello-sse-server --target ~/.matrix/runners/hello-sse-server/0.1.
 
 ---
 
-## ▶️ Run UX (with handy next steps)
+## ▶️ Run, interact, and probe
 
 `matrix run <alias>` prints a click-ready **URL** and **Health** link, plus a logs hint.
-Typical follow-ups you can run immediately:
 
 ```bash
+# Instant interaction
+matrix do <alias> "Your question here"
+
 # Probe tools exposed by your local MCP server (auto-discovers port)
-matrix mcp probe --alias hello-sse-server
+matrix mcp probe --alias <alias>
 
 # Call a tool (optional args as JSON)
-matrix mcp call hello --alias hello-sse-server --args '{}'
+matrix mcp call <tool_name> --alias <alias> --args '{"key":"value"}'
 ```
 
 ---
 
 ## 🔗 Connector mode (attach to a remote/local MCP)
 
-If you already have an MCP server listening (e.g. on `http://127.0.0.1:6289/sse`), you can **attach** to it without starting a local process by using a **connector runner**:
+If you already have an MCP server listening (e.g. on `http://127.0.0.1:6289/sse`), **attach** to it without starting a local process by using a **connector runner**:
 
 `~/.matrix/runners/<alias>/<version>/runner.json`:
 
@@ -241,7 +303,7 @@ matrix mcp call chat --alias watsonx-chat --args '{"query":"Hello"}'
 Probe and call tools on MCP servers.
 
 ```bash
-# Probe by alias (auto-discovers port; infers endpoint from runner.json or uses sensible defaults)
+# Probe by alias (auto-discovers port; infers endpoint)
 matrix mcp probe --alias hello-sse-server
 
 # Or probe by full SSE URL
@@ -258,14 +320,13 @@ Notes:
 
 * SSE works with `mcp>=1.13.1` (installed via the `mcp` extra).
 * WebSocket URLs (`ws://`/`wss://`) require the `websockets` package.
-* If a call fails, the CLI now helps by listing tools exposed by the server and tolerates `/sse` vs `/messages/` endpoints.
+* If a call fails, the CLI helps by listing tools and tolerates `/sse` vs `/messages/` endpoints.
 
 ---
 
 ## 🧭 Process management
 
-`matrix ps` shows a **URL** column constructed from the runner’s port and endpoint
-(auto-read from `runner.json` where possible, default `/messages/`):
+`matrix ps` shows a **URL** column built from the runner’s port and endpoint (default `/messages/`).
 
 ```
 ┏━━━━━━━━━━━━━━━━━━┳━━━━━━┳━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
@@ -311,9 +372,9 @@ matrix connection --json
 
 TLS policy:
 
-* Respects `REQUESTS_CA_BUNDLE` / `SSL_CERT_FILE`
-* Tries OS trust (when available)
-* Falls back to `certifi`
+* Respects `REQUESTS_CA_BUNDLE` / `SSL_CERT_FILE`.
+* Tries OS trust (when available).
+* Falls back to `certifi`.
 * Never throws on network errors in health checks — returns a structured status with exit codes.
 
 ---
@@ -367,24 +428,10 @@ matrix mcp probe --url "http://127.0.0.1:${port}/messages/" --json
 
 ## 🐞 Troubleshooting
 
-* **“Missing 'mcp' package”**
-  Install the optional extra: `pip install "matrix-cli[mcp]"`
-  (For WebSocket endpoints also: `pip install websockets`.)
-
-* **TLS / certificate errors**
-  Set `SSL_CERT_FILE` or `REQUESTS_CA_BUNDLE` to your CA bundle:
-
-  ```bash
-  export SSL_CERT_FILE=/path/to/ca.pem
-  # or
-  export REQUESTS_CA_BUNDLE=/path/to/ca.pem
-  ```
-
-* **Alias not found when probing**
-  Use the alias shown by `matrix ps` (case-insensitive match supported), or pass `--url` directly.
-
-* **Connector mode shows PID=0**
-  That’s expected: you attached to an existing server via URL. Make sure the remote server is actually running.
+* **“Missing 'mcp' package”** — Install the optional extra: `pip install "matrix-cli[mcp]"` (and `pip install websockets` for WS).
+* **TLS / certificate errors** — Set `SSL_CERT_FILE` or `REQUESTS_CA_BUNDLE` to your CA bundle.
+* **Alias not found when probing** — Use the alias shown by `matrix ps` (case-insensitive), or pass `--url` directly.
+* **Connector mode shows PID=0** — Expected in attach mode; ensure the remote server is running.
 
 ---
 
@@ -397,7 +444,7 @@ source .venv/bin/activate
 pip install -U pip
 pip install -e ".[dev,mcp]"
 
-# Common tasks (Makefile may vary by repo)
+# Common tasks
 make lint       # ruff/flake8
 make fmt        # black
 make typecheck  # mypy
@@ -407,9 +454,9 @@ make build      # sdist + wheel
 
 ---
 
-## 🌍 Why MatrixHub
+## 🌍 About MatrixHub
 
-MatrixHub is on a mission to become the **pip of agents & MCP servers** — a secure, open, and developer-friendly registry and runtime that scales from your laptop to the enterprise. If you’re building agents, tools, or MCP services, **Matrix CLI** is the fastest way to discover, install, and run them with confidence.
+MatrixHub aims to be the **pip of agents & MCP servers** — a secure, open, and developer-friendly registry and runtime that scales from personal laptops to global enterprises. If you’re building agents, tools, or MCP services, Matrix CLI gets you from idea to running in seconds.
 
 ---
 
@@ -421,7 +468,7 @@ Apache License 2.0
 
 ## ✉️ Feedback
 
-Issues and PRs welcome! If you hit rough edges with install/probing/health, the new **connector** flow, or `ps --plain/--json` and `uninstall` flows, please open an issue with your command, output, and environment details.
+Issues and PRs welcome! If you hit rough edges with install/probing/health, the new **connector** flow, or `ps --plain/--json` and `uninstall`, please open an issue with your command, output, and environment.
 
 * GitHub: [https://github.com/agent-matrix/matrix-cli](https://github.com/agent-matrix/matrix-cli)
 * PyPI: [https://pypi.org/project/matrix-cli/](https://pypi.org/project/matrix-cli/)
