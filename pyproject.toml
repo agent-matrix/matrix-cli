@@ -29,7 +29,7 @@ dependencies = [
   "typer>=0.12",
   "rich>=13.7",
   # Ensure a matching SDK wheel is available in testers' wheelhouse during offline install
-  "matrix-python-sdk>=0.1.9",
+  "matrix-python-sdk>=0.1.10",
   "httpx>=0.28,<0.29",
   "requests>=2.32",
   "mcp>=1.13.1",
