@@ -46,14 +46,54 @@ def _load_toml() -> dict:
 _TLS_BOOTSTRAPPED = False
 
 
+def _truthy(name: str, default: bool = False) -> bool:
+    v = os.getenv(name)
+    if v is None:
+        return default
+    return v.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _clear_env_ca_if_unwanted() -> None:
+    """
+    Unless MATRIX_RESPECT_ENV_CA=1, scrub SSL_CERT_FILE / REQUESTS_CA_BUNDLE
+    so stale paths from other venvs can't break TLS.
+    """
+    if _truthy("MATRIX_RESPECT_ENV_CA", False):
+        return
+    for key in ("SSL_CERT_FILE", "REQUESTS_CA_BUNDLE"):
+        if key in os.environ:
+            os.environ.pop(key, None)
+
+
+def _valid_env_ca_path() -> Optional[str]:
+    """
+    Return a usable CA bundle path from SSL_CERT_FILE/REQUESTS_CA_BUNDLE
+    only if the feature is enabled and the file exists.
+    """
+    if not _truthy("MATRIX_RESPECT_ENV_CA", False):
+        return None
+    for key in ("SSL_CERT_FILE", "REQUESTS_CA_BUNDLE"):
+        p = os.getenv(key)
+        if not p:
+            continue
+        if os.path.isfile(p):
+            return p
+        # Stale or invalid path -> clean it up so downstream code can recover
+        os.environ.pop(key, None)
+    return None
+
+
 def _inject_os_trust_if_possible() -> None:
     """
-    Respect env CA first; else try OS trust (truststore); else fall back to certifi.
-
-    This keeps HTTPS verification robust in diverse environments (local, CI, corporate).
+    Prefer OS trust on macOS/Windows via truststore; avoid mutating env CA vars.
     """
-    if os.getenv("REQUESTS_CA_BUNDLE") or os.getenv("SSL_CERT_FILE"):
+    _clear_env_ca_if_unwanted()
+
+    # If env CA is explicitly respected and valid, leave it alone.
+    if _valid_env_ca_path():
         return
+
+    # Try to make stdlib/requests use OS store on macOS/Windows
     try:
         import truststore  # type: ignore
 
@@ -61,39 +101,53 @@ def _inject_os_trust_if_possible() -> None:
         os.environ.setdefault("PYTHONHTTPSVERIFY", "1")
         return
     except Exception:
-        pass
-    try:
-        import certifi  # type: ignore
-
-        ca = certifi.where()
-        os.environ.setdefault("REQUESTS_CA_BUNDLE", ca)
-        os.environ.setdefault("SSL_CERT_FILE", ca)
-    except Exception:
+        # No truststore available — benign
         pass
 
 
 def _build_verify() -> VerifyType:
     """
-    Produce a 'verify' object suitable for both httpx and requests:
-      - If SSL_CERT_FILE/REQUESTS_CA_BUNDLE set: use them.
-      - Else try OS trust via stdlib.
-      - Else fall back to certifi.
-      - Else True (default verification).
+    Produce a 'verify' object suitable for httpx and SDKs:
+      - If MATRIX_RESPECT_ENV_CA=1 and env path valid: wrap in SSLContext.
+      - Else try OS trust via truststore.SSLContext or stdlib (with injected trust).
+      - Else fall back to certifi (wrapped into SSLContext).
+      - Else return True (default verification).
     """
-    env_ca = os.getenv("SSL_CERT_FILE") or os.getenv("REQUESTS_CA_BUNDLE")
+    # 1) Respect an explicit, valid env CA (opt-in)
+    env_ca = _valid_env_ca_path()
     if env_ca:
-        return env_ca
+        try:
+            ctx = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+            ctx.load_verify_locations(cafile=env_ca)
+            return ctx
+        except Exception:
+            pass  # fall through
+
+    # 2) Prefer an explicit truststore SSLContext (Apple Keychain/Windows Store)
+    try:
+        import truststore  # type: ignore
+
+        return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    except Exception:
+        pass
+
+    # 3) Use stdlib defaults (truststore.inject_into_ssl may have patched these)
     try:
         ctx = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
         ctx.load_default_certs()
         return ctx
     except Exception:
         pass
+
+    # 4) Fall back to certifi (wrap in SSLContext to avoid httpx deprecation warnings)
     try:
         import certifi  # type: ignore
 
-        return certifi.where()
+        ctx = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+        ctx.load_verify_locations(cafile=certifi.where())
+        return ctx
     except Exception:
+        # 5) Last resort
         return True
 
 
@@ -115,6 +169,8 @@ def _force_httpx_verify(verify: VerifyType) -> None:
     def _patched_client_init(self, *args, **kwargs):  # type: ignore[no-redef]
         if "verify" not in kwargs:
             kwargs["verify"] = verify
+        # Avoid env proxies/CA surprises unless explicitly requested by the caller
+        kwargs.setdefault("trust_env", False)
         return _orig_client_init(self, *args, **kwargs)
 
     httpx.Client.__init__ = _patched_client_init  # type: ignore[assignment]
@@ -126,6 +182,7 @@ def _force_httpx_verify(verify: VerifyType) -> None:
         def _patched_async_init(self, *args, **kwargs):  # type: ignore[no-redef]
             if "verify" not in kwargs:
                 kwargs["verify"] = verify
+            kwargs.setdefault("trust_env", False)
             return _orig_async_init(self, *args, **kwargs)
 
         httpx.AsyncClient.__init__ = _patched_async_init  # type: ignore[assignment, attr-defined]
@@ -150,41 +207,54 @@ def _bootstrap_tls_once() -> None:
 def build_requests_session():
     """
     Build a `requests.Session` with best-possible trust:
-      - If SSL_CERT_FILE/REQUESTS_CA_BUNDLE set: use them.
-      - Else try OS trust via truststore for stdlib/requests.
-      - Else fall back to certifi.
+      - Let truststore-injected stdlib use OS trust when available.
+      - Otherwise fall back to certifi path.
+      - Ignore shell env CA by default (unless MATRIX_RESPECT_ENV_CA=1).
     """
     import requests  # type: ignore
 
-    # Ensure our trust bootstrap ran (sets env / truststore if possible)
+    # Ensure our trust bootstrap ran (patches stdlib ssl if truststore is present)
     _inject_os_trust_if_possible()
 
     sess = requests.Session()
-    env_ca = os.getenv("SSL_CERT_FILE") or os.getenv("REQUESTS_CA_BUNDLE")
+
+    # If respecting env CA and it is valid, requests happily accepts the path
+    env_ca = _valid_env_ca_path()
     if env_ca:
         sess.verify = env_ca
         return sess
 
+    # Otherwise, prefer default verification (truststore-injected) or certifi
     try:
         import certifi  # type: ignore
 
-        sess.verify = certifi.where()
+        # Only force certifi when not on mac/win or when explicitly requested
+        if not _truthy("MATRIX_PREFER_SYSTEM_TRUST", True):
+            sess.verify = certifi.where()
+            return sess
     except Exception:
-        sess.verify = True  # default behavior
+        # Leave default verification
+        pass
 
+    # Default: let requests use stdlib SSL (truststore may have injected OS trust)
+    # requests' default is verify=True; keep it.
     return sess
 
 
 def build_httpx_client_forced(timeout: float = 5.0):
     """
-    Build an httpx.Client that uses the SAME verify policy as our requests session.
-    Useful for utilities like health checks so they share the exact TLS behavior.
+    Build an httpx.Client with our hardened verify policy.
+    - Pass an SSLContext directly (prevents stale path issues).
+    - Disable trust_env to avoid proxies/CA overrides from the shell environment.
     """
     import httpx  # type: ignore
 
-    sess = build_requests_session()
-    verify = getattr(sess, "verify", True)
-    return httpx.Client(timeout=timeout, verify=verify, trust_env=True)
+    return httpx.Client(
+        timeout=timeout,
+        verify=_build_verify(),   # SSLContext | True
+        trust_env=False,          # avoid env surprises
+        follow_redirects=True,
+    )
 
 
 # -----------------------------------------------------------------------------

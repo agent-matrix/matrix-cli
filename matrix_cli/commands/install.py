@@ -7,6 +7,7 @@ import sys
 import time
 import urllib.request
 from urllib.parse import urlparse
+import ssl
 import subprocess
 import tempfile
 import shutil
@@ -24,6 +25,17 @@ app = typer.Typer(
     add_completion=False,
     no_args_is_help=False,
 )
+
+# ------------------------- TLS context for urllib (minimal, safe) -------------------------
+import ssl
+try:
+    import certifi  # type: ignore
+    _CLI_CAF = certifi.where()
+except Exception:  # pragma: no cover
+    _CLI_CAF = None
+
+def _ssl_ctx():
+    return ssl.create_default_context(cafile=_CLI_CAF) if _CLI_CAF else ssl.create_default_context()
 
 # ------------------------- Light utils (no new deps) -------------------------
 
@@ -346,7 +358,9 @@ def _resolve_fqid_via_search(client, cfg, raw_id: str) -> str:  # pragma: no cov
             items2 = _search_once(client, ns_hint=None, broaden=True)
         except Exception:
             items2 = []
-        best = _choose_best_candidate(items2, want_ns=want_ns, want_name=want_name, want_ver=want_ver)
+        best = _choose_best_in_bucket([( _version_key(it.get("version") or "0.0.0"), it) for it in items2]) or None
+        if not best:
+            best = _choose_best_candidate(items2, want_ns=want_ns, want_name=want_name, want_ver=want_ver)
 
     if not best:
         raise ValueError(f"could not resolve id '{raw_id}' from catalog")
@@ -528,13 +542,13 @@ def _looks_like_url(s: str) -> bool:  # pragma: no cover
     s = (s or "").strip().lower()
     return s.startswith("http://") or s.startswith("https://") or s.startswith("file://")
 
-def _load_manifest_from(source: str) -> tuple[Dict[str, Any], Optional[str]]:
+def _load_manifest_from_(source: str) -> tuple[Dict[str, Any], Optional[str]]:
     """Load a manifest from URL-like or filesystem path. Returns (manifest, source_url_for_provenance)."""
     src = (source or "").strip()
     if not src:
         raise ValueError("empty manifest source")
     if src.lower().startswith("http://") or src.lower().startswith("https://"):
-        with urllib.request.urlopen(src, timeout=15) as resp:  # nosec - dev provided URL
+        with urllib.request.urlopen(src, timeout=15, context=_ssl_ctx()) as resp:  # nosec - dev provided URL
             data = resp.read().decode("utf-8")
         return json.loads(data), src
     if src.lower().startswith("file://"):
@@ -542,6 +556,32 @@ def _load_manifest_from(source: str) -> tuple[Dict[str, Any], Optional[str]]:
         return json.loads(p.read_text(encoding="utf-8")), str(p.as_uri())
     p = Path(src).expanduser().resolve()
     return json.loads(p.read_text(encoding="utf-8")), None
+
+def _load_manifest_from(source: str) -> tuple[Dict[str, Any], Optional[str]]:
+    """Load a manifest from URL-like or filesystem path.
+    Returns (manifest, source_url_for_provenance).
+    """
+    src = (source or "").strip()
+    if not src:
+        raise ValueError("empty manifest source")
+
+    # Remote URL (HTTP/HTTPS)
+    if src.lower().startswith(("http://", "https://")):
+        # Use an explicit TLS context so truststore injection (if present) is honored.
+        with urllib.request.urlopen(src, timeout=15, context=_ssl_ctx()) as resp:  # nosec - dev provided URL
+            data = resp.read().decode("utf-8")
+        return json.loads(data), src
+
+    # file:// URL
+    if src.lower().startswith("file://"):
+        p = Path(src[7:])
+        return json.loads(p.read_text(encoding="utf-8")), str(p.as_uri())
+
+    # Local filesystem path
+    p = Path(src).expanduser().resolve()
+    return json.loads(p.read_text(encoding="utf-8")), None
+
+
 
 def _normalize_manifest_for_sse(manifest: Dict[str, Any]) -> Dict[str, Any]:
     """Normalize SSE url and strip 'transport' if present (non-destructive)."""
@@ -698,9 +738,15 @@ def _maybe_fetch_runner_and_repo(
             pass
         return ""
 
-    def _fetch_json(url: str, timeout: int = 20) -> Dict[str, Any]:
-        with urllib.request.urlopen(url, timeout=timeout) as resp:
+    def _fetch_json_(url: str, timeout: int = 20) -> Dict[str, Any]:
+        with urllib.request.urlopen(url, timeout=timeout, context=_ssl_ctx()) as resp:
             return json.loads(resp.read().decode("utf-8"))
+    def _fetch_json(url: str, timeout: int = 20) -> Dict[str, Any]:
+        """Fetch JSON from a URL with proper TLS context."""
+        with urllib.request.urlopen(url, timeout=timeout, context=_ssl_ctx()) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+
+
 
     def _manifest_repo_spec(mf: Dict[str, Any]) -> Dict[str, Any] | None:
         repo = mf.get("repository")

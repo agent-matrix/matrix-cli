@@ -23,10 +23,22 @@ def _get_attr_or_key(obj: _t.Any, name: str, default: _t.Any = None) -> _t.Any:
     return getattr(obj, name, default)
 
 
-def _http_get(url: str, *, timeout: float = 1.0) -> tuple[int, str]:
+def _http_get_(url: str, *, timeout: float = 1.0) -> tuple[int, str]:
     """GET url, return (status_code, response_text). Raise URLError/HTTPError on failure."""
     req = urllib.request.Request(url, method="GET")
     with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec - local/known URLs
+        code = resp.getcode() or 0
+        body = resp.read().decode("utf-8", errors="replace")
+        return code, body
+
+def _http_get(url: str, *, timeout: float = 1.0) -> tuple[int, str]:
+    """GET url, return (status_code, response_text). Raise URLError/HTTPError on failure."""
+    import ssl  # local import so this function is self-contained in patches
+    req = urllib.request.Request(url, method="GET")
+    # Use an explicit TLS context so truststore injection (if present) is honored.
+    with urllib.request.urlopen(
+        req, timeout=timeout, context=ssl.create_default_context()
+    ) as resp:  # nosec - local/known URLs
         code = resp.getcode() or 0
         body = resp.read().decode("utf-8", errors="replace")
         return code, body

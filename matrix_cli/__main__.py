@@ -3,6 +3,18 @@ from __future__ import annotations
 import sys
 import typer
 
+# --- Minimal, production-safe TLS env seeding (no-op if user configured) ---
+# Ensures urllib/requests/httpx can verify TLS with a consistent CA bundle
+# on macOS and some virtualenvs. Does nothing if variables are already set.
+try:  # pragma: no cover
+    import os
+    import certifi  # type: ignore
+    _CA_PATH = certifi.where()
+    os.environ.setdefault("SSL_CERT_FILE", _CA_PATH)
+    os.environ.setdefault("REQUESTS_CA_BUNDLE", _CA_PATH)
+except Exception:
+    pass
+
 # ---- OPTIMIZED FAST PATHS ----
 # Handle `matrix --version` and `matrix -V` without importing the full CLI
 if len(sys.argv) == 2 and sys.argv[1] in {"--version", "-V"}:
