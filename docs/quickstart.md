@@ -1,4 +1,3 @@
-
 <!-- docs/quickstart.md -->
 
 # Quickstart
@@ -27,20 +26,39 @@ matrix install hello-sse-server --alias hello-sse-server --force --no-prompt
 
 ```bash
 matrix run hello-sse-server
-matrix ps                # URL column
+matrix ps                # URL column shows host:port and endpoint
 matrix logs hello-sse-server -f
 ```
 
 ## 5) MCP probe & call
 
-```bash
-# by alias (auto-discovers URL)
-matrix mcp probe --alias hello-sse-server
-matrix mcp call hello --alias hello-sse-server --args '{}'
+### By alias (auto‑discovers URL/endpoint)
 
-# or by explicit URL
-matrix mcp probe --url http://127.0.0.1:41481/messages/
+```bash
+matrix mcp probe --alias hello-sse-server
+
+# Common input forms (pick one):
+matrix mcp call hello --alias hello-sse-server --text "Say hello to Genoa"
+matrix mcp call hello --alias hello-sse-server --kv name=world
+matrix mcp call hello --alias hello-sse-server --args '{"name":"world"}'
+# from stdin
+echo '{"name":"world"}' | matrix mcp call hello --alias hello-sse-server --args @-
 ```
+
+### By explicit URL
+
+```bash
+# If your server exposes /messages/
+matrix mcp probe --url http://127.0.0.1:41481/messages/
+
+# If your server exposes /sse/ (many MCP servers do), note the trailing slash:
+matrix mcp probe --url http://127.0.0.1:41481/sse/
+
+# Call with explicit URL and JSON args
+matrix mcp call hello --url http://127.0.0.1:41481/sse/ --args '{"name":"world"}'
+```
+
+> **Tip (bash/WSL):** Wrap JSON in **single quotes** so you don’t have to escape the inner double quotes.
 
 ## 6) Stop & uninstall
 

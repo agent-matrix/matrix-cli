@@ -25,6 +25,7 @@ nav:
   - Quickstart: quickstart.md
   - MCP (Probe & Call): mcp.md
   - Runtime (run/ps/logs): runtime.md
+  - Execution: do.md
   - Troubleshooting: troubleshooting.md
   - Changelog: changelog.md
 
