@@ -1,5 +1,6 @@
 # server.py  – lenient Watsonx agent
-import os, logging
+import os
+import logging
 from typing import Union
 from dotenv import load_dotenv
 

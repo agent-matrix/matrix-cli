@@ -144,7 +144,14 @@ def _compose_probe_url(base_url: str, endpoint: str) -> str:
 
 
 # ---- additive: zero-latency quickstart banner helpers ---------------------- #
-_PREFERRED_DEFAULT_INPUT_KEYS = ("x-default-input", "query", "prompt", "text", "input", "message")
+_PREFERRED_DEFAULT_INPUT_KEYS = (
+    "x-default-input",
+    "query",
+    "prompt",
+    "text",
+    "input",
+    "message",
+)
 
 
 def _load_runner_json(target_path: str | None) -> dict:
@@ -175,12 +182,20 @@ def _infer_default_input_key_from_schema(schema: dict | None) -> str | None:
     # 3) one required string
     if isinstance(req, list) and len(req) == 1:
         rk = req[0]
-        t = (props.get(rk) or {}).get("type") if isinstance(props.get(rk), dict) else None
+        t = (
+            (props.get(rk) or {}).get("type")
+            if isinstance(props.get(rk), dict)
+            else None
+        )
         if t in (None, "string"):
             return rk
     # 4) one string prop overall
     if isinstance(props, dict):
-        sk = [k for k, v in props.items() if isinstance(v, dict) and v.get("type") in (None, "string")]
+        sk = [
+            k
+            for k, v in props.items()
+            if isinstance(v, dict) and v.get("type") in (None, "string")
+        ]
         if len(sk) == 1:
             return sk[0]
     return None
@@ -222,7 +237,9 @@ def _extract_candidate_schemas(data: dict) -> list[dict]:
     return out
 
 
-def _infer_quickstart_lines(alias: str, target_path: str | None, endpoint: str) -> list[str]:
+def _infer_quickstart_lines(
+    alias: str, target_path: str | None, endpoint: str
+) -> list[str]:
     data = _load_runner_json(target_path)
     is_mcp = _is_mcp_sse_runner(data) or endpoint.rstrip("/").endswith("/sse")
     if not is_mcp:
@@ -248,7 +265,7 @@ def _infer_quickstart_lines(alias: str, target_path: str | None, endpoint: str) 
         if dk:
             return [
                 "Next steps:",
-                f"• One-shot:        matrix do {alias} \"Example input\"",
+                f'• One-shot:        matrix do {alias} "Example input"',
                 f"• See arguments:   matrix help {alias}",
             ]
 

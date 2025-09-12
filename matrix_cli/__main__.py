@@ -34,9 +34,11 @@ if len(sys.argv) > 1 and sys.argv[1] in {"do", "help", "chat"}:
         if cmd == "do":
             # Prefer module app to preserve its own option parsing & help.
             from matrix_cli.commands.do import app as do_app  # lazy import
+
             do_app(args=sys.argv[2:], prog_name="matrix do")
         elif cmd == "help":
             from matrix_cli.commands.help import app as help_app  # lazy import
+
             help_app(args=sys.argv[2:], prog_name="matrix help")
         else:  # cmd == "chat"
             # chat is optional/beta; import only if present
@@ -115,9 +117,11 @@ app.add_typer(
     hidden=True,
 )
 
+
 def main() -> None:
     """The main entry point for the CLI application."""
     app()
+
 
 if __name__ == "__main__":
     main()

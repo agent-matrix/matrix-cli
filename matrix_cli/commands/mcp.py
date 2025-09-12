@@ -9,7 +9,7 @@ import os
 import sys
 from dataclasses import asdict as _dc_asdict, is_dataclass as _dc_is_dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple, List, Iterable
+from typing import Any, Dict, Optional, Tuple, List
 
 import typer
 
@@ -430,13 +430,21 @@ def _infer_default_input_key(schema: Dict[str, Any] | None) -> Optional[str]:
     # single required string
     if isinstance(req, (list, tuple)) and len(req) == 1:
         rk = req[0]
-        t = (props.get(rk) or {}).get("type") if isinstance(props.get(rk), dict) else None
+        t = (
+            (props.get(rk) or {}).get("type")
+            if isinstance(props.get(rk), dict)
+            else None
+        )
         if t in (None, "string"):
             return rk
 
     # single string property overall
     if isinstance(props, dict):
-        string_keys = [k for k, v in props.items() if isinstance(v, dict) and v.get("type") in (None, "string")]
+        string_keys = [
+            k
+            for k, v in props.items()
+            if isinstance(v, dict) and v.get("type") in (None, "string")
+        ]
         if len(string_keys) == 1:
             return string_keys[0]
 
@@ -457,7 +465,7 @@ def _parse_kv_pairs(kv_list: Optional[List[str]]) -> Dict[str, Any]:
         # coerce bool/int/float when obvious
         vl = v.lower()
         if vl in {"true", "false"}:
-            out[k] = (vl == "true")
+            out[k] = vl == "true"
             continue
         try:
             if "." in v:
@@ -643,7 +651,10 @@ async def _probe_async(
                             break
                     if tool_obj is None:
                         for t in tools:
-                            if str(getattr(t, "name", "")).strip().casefold() == call_tool.strip().casefold():
+                            if (
+                                str(getattr(t, "name", "")).strip().casefold()
+                                == call_tool.strip().casefold()
+                            ):
                                 tool_obj = t
                                 break
                     if tool_obj is None:
@@ -656,8 +667,16 @@ async def _probe_async(
                         return report
 
                     # Build arguments if not provided
-                    if not call_args and (wizard or text_arg is not None or (kv_pairs and len(kv_pairs) > 0)):
-                        schema = getattr(tool_obj, "input_schema", None) or getattr(tool_obj, "inputSchema", None) or {}
+                    if not call_args and (
+                        wizard
+                        or text_arg is not None
+                        or (kv_pairs and len(kv_pairs) > 0)
+                    ):
+                        schema = (
+                            getattr(tool_obj, "input_schema", None)
+                            or getattr(tool_obj, "inputSchema", None)
+                            or {}
+                        )
                         # Start from kv pairs
                         args_from_kv = _parse_kv_pairs(kv_pairs)
                         built: Dict[str, Any] = {}
@@ -673,7 +692,11 @@ async def _probe_async(
                                 built.setdefault(dk, text_arg)
                             else:
                                 # Fallback: single property schema
-                                props = (schema.get("properties") or {}) if isinstance(schema, dict) else {}
+                                props = (
+                                    (schema.get("properties") or {})
+                                    if isinstance(schema, dict)
+                                    else {}
+                                )
                                 if len(props) == 1:
                                     only_key = next(iter(props.keys()))
                                     built.setdefault(only_key, text_arg)
@@ -687,7 +710,9 @@ async def _probe_async(
                         call_args = {**args_from_kv, **built}
 
                     try:
-                        resp = await session.call_tool(name=call_tool, arguments=call_args)
+                        resp = await session.call_tool(
+                            name=call_tool, arguments=call_args
+                        )
                         content = getattr(resp, "content", [])
                         report["call"] = {
                             "tool": call_tool,
@@ -784,7 +809,11 @@ def _prompt_from_schema(schema: Dict[str, Any] | None) -> Dict[str, Any]:
     for name, spec in props.items():
         if not isinstance(spec, dict):
             continue
-        typ = (spec.get("type") or "string").lower() if isinstance(spec.get("type"), str) else str(spec.get("type") or "string")
+        typ = (
+            (spec.get("type") or "string").lower()
+            if isinstance(spec.get("type"), str)
+            else str(spec.get("type") or "string")
+        )
         enum = spec.get("enum") if isinstance(spec.get("enum"), list) else None
         default = spec.get("default") if name not in required else None
         desc = spec.get("description") or ""

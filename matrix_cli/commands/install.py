@@ -27,6 +27,7 @@ app = typer.Typer(
 
 # ------------------------- Light utils (no new deps) -------------------------
 
+
 def _to_dict(obj: Any) -> Dict[str, Any]:
     """Convert Pydantic v2/v1 models or dicts into plain dicts — no hard dep on pydantic."""
     if isinstance(obj, dict):
@@ -54,6 +55,7 @@ def _to_dict(obj: Any) -> Dict[str, Any]:
             pass
     return {}
 
+
 def _items_from(payload: Any) -> List[Dict[str, Any]]:
     """Extract list of items from various payload shapes."""
     body = _to_dict(payload)
@@ -66,9 +68,11 @@ def _items_from(payload: Any) -> List[Dict[str, Any]]:
         return [i if isinstance(i, dict) else _to_dict(i) for i in payload]
     return []
 
+
 def _is_fqid(s: str) -> bool:
     """Fully-qualified id looks like 'ns:name@version'."""
     return (":" in s) and ("@" in s)
+
 
 def _split_short_id(raw: str) -> Tuple[str | None, str, str | None]:
     """
@@ -93,6 +97,7 @@ def _split_short_id(raw: str) -> Tuple[str | None, str, str | None]:
         ver = ver.strip() or None
     return ns, name.strip(), ver
 
+
 def _parse_id_fields(
     item: Dict[str, Any],
 ) -> Tuple[str | None, str | None, str | None, str | None]:
@@ -113,6 +118,7 @@ def _parse_id_fields(
     ver2 = item.get("version")
     return ns2, name2, ver2, typ
 
+
 def _version_key(s: str) -> Any:
     """
     Sort key for versions.
@@ -120,6 +126,7 @@ def _version_key(s: str) -> Any:
     """
     try:
         from packaging.version import Version
+
         return Version(s)
     except Exception:
         parts: List[Any] = []
@@ -139,15 +146,18 @@ def _version_key(s: str) -> Any:
             parts.append(int(chunk) if chunk.isdigit() else chunk)
         return tuple(parts)
 
+
 def _is_prerelease(v: Any) -> bool:
     """Return True if Version is pre-release when available, else False."""
     try:
         from packaging.version import Version
+
         if isinstance(v, Version):
             return bool(v.is_prerelease)
         return Version(str(v)).is_prerelease
     except Exception:
         return False
+
 
 def _pick_best_in_bucket(cands: List[Tuple[Any, Dict[str, Any]]]) -> Dict[str, Any]:
     """Prefer stable > pre-release; within each, choose highest version."""
@@ -162,6 +172,7 @@ def _pick_best_in_bucket(cands: List[Tuple[Any, Dict[str, Any]]]) -> Dict[str, A
         return {}
     bucket.sort(key=lambda x: x[0], reverse=True)
     return bucket[0][1]
+
 
 def _choose_best_candidate(
     items: List[Dict[str, Any]],
@@ -197,6 +208,7 @@ def _choose_best_candidate(
     best = _pick_best_in_bucket(mcp) or _pick_best_in_bucket(other)
     return best or None
 
+
 def _is_dns_or_conn_failure(err: Exception) -> bool:
     """Heuristic: detect common DNS/connection failures by message text."""
     needles = (
@@ -220,9 +232,11 @@ def _is_dns_or_conn_failure(err: Exception) -> bool:
         cur = getattr(cur, "__cause__", None) or getattr(cur, "__context__", None)
     return False
 
+
 def _env_on(name: str) -> bool:
     v = (os.getenv(name) or "").strip().lower()
     return v in {"1", "true", "yes", "on"}
+
 
 def _env_on_default_true(name: str) -> bool:
     """
@@ -233,6 +247,7 @@ def _env_on_default_true(name: str) -> bool:
         return True
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
+
 def _json_pretty(obj: Any) -> str:
     try:
         return json.dumps(obj, indent=2, ensure_ascii=False, default=str)
@@ -242,11 +257,16 @@ def _json_pretty(obj: Any) -> str:
         except Exception:
             return repr(obj)
 
+
 def _json_preview(obj: Any, *, limit: int = 6000) -> str:
     s = _json_pretty(obj)
-    return s if len(s) <= limit else f"{s[:limit]}\n… (truncated {len(s) - limit} chars)"
+    return (
+        s if len(s) <= limit else f"{s[:limit]}\n… (truncated {len(s) - limit} chars)"
+    )
+
 
 # ------------------------- Tiny on-disk resolver cache -------------------------
+
 
 def _cache_path(cfg) -> Path:
     # ~/.matrix/cache/resolve.json
@@ -258,6 +278,7 @@ def _cache_path(cfg) -> Path:
         pass
     return cdir / "resolve.json"
 
+
 def _cache_load(cfg) -> Dict[str, Any]:
     p = _cache_path(cfg)
     try:
@@ -267,12 +288,14 @@ def _cache_load(cfg) -> Dict[str, Any]:
         pass
     return {"hub": str(cfg.hub_base), "entries": {}}
 
+
 def _cache_save(cfg, data: Dict[str, Any]) -> None:
     p = _cache_path(cfg)
     try:
         p.write_text(json.dumps(data, indent=2), encoding="utf-8")
     except Exception:
         pass
+
 
 def _cache_get(cfg, raw: str, ttl: int = 300) -> str | None:
     data = _cache_load(cfg)
@@ -284,6 +307,7 @@ def _cache_get(cfg, raw: str, ttl: int = 300) -> str | None:
     if (time.time() - float(ent.get("ts", 0))) > max(5, ttl):
         return None
     return ent.get("fqid")
+
 
 def _cache_put(cfg, raw: str, fqid: str) -> None:
     data = _cache_load(cfg)
@@ -297,7 +321,9 @@ def _cache_put(cfg, raw: str, fqid: str) -> None:
             entries.pop(k, None)
     _cache_save(cfg, data)
 
+
 # ------------------------- Resolver & build fallback -------------------------
+
 
 def _resolve_fqid_via_search(client, cfg, raw_id: str) -> str:  # pragma: no cover
     """
@@ -312,7 +338,9 @@ def _resolve_fqid_via_search(client, cfg, raw_id: str) -> str:  # pragma: no cov
 
     want_ns, want_name, want_ver = _split_short_id(raw_id)
 
-    def _search_once(cli, *, ns_hint: str | None, broaden: bool) -> List[Dict[str, Any]]:
+    def _search_once(
+        cli, *, ns_hint: str | None, broaden: bool
+    ) -> List[Dict[str, Any]]:
         params: Dict[str, Any] = {
             "q": want_name,
             "limit": 25,
@@ -331,22 +359,29 @@ def _resolve_fqid_via_search(client, cfg, raw_id: str) -> str:  # pragma: no cov
         if _is_dns_or_conn_failure(e):
             try:
                 from matrix_sdk.client import MatrixClient as _MC
+
                 local_cli = _MC(base_url="http://localhost:443", token=cfg.token)
                 items = _search_once(local_cli, ns_hint=want_ns, broaden=False)
-                warn("(offline?) couldn't reach public hub; used local dev hub at http://localhost:443")
+                warn(
+                    "(offline?) couldn't reach public hub; used local dev hub at http://localhost:443"
+                )
             except Exception:
                 raise
         else:
             raise
 
-    best = _choose_best_candidate(items, want_ns=want_ns, want_name=want_name, want_ver=want_ver)
+    best = _choose_best_candidate(
+        items, want_ns=want_ns, want_name=want_name, want_ver=want_ver
+    )
 
     if not best and want_ns is None:
         try:
             items2 = _search_once(client, ns_hint=None, broaden=True)
         except Exception:
             items2 = []
-        best = _choose_best_candidate(items2, want_ns=want_ns, want_name=want_name, want_ver=want_ver)
+        best = _choose_best_candidate(
+            items2, want_ns=want_ns, want_name=want_name, want_ver=want_ver
+        )
 
     if not best:
         raise ValueError(f"could not resolve id '{raw_id}' from catalog")
@@ -365,7 +400,9 @@ def _resolve_fqid_via_search(client, cfg, raw_id: str) -> str:  # pragma: no cov
     _cache_put(cfg, raw_id, fqid)
     return fqid
 
+
 # ------------------------- Safe plan & build (no local path leak) -------------------------
+
 
 def _sanitize_segment(s: str, fallback: str = "unnamed") -> str:
     s = (s or "").strip()
@@ -378,10 +415,12 @@ def _sanitize_segment(s: str, fallback: str = "unnamed") -> str:
     cleaned = "".join(out).strip(" .")
     return cleaned or fallback
 
+
 def _label_from_fqid_alias(fqid: str, alias: str) -> str:
     """Build the server-safe plan label <alias>/<version> from fqid and alias."""
     ver = fqid.rsplit("@", 1)[-1] if "@" in fqid else "0"
     return f"{_sanitize_segment(alias)}/{_sanitize_segment(ver)}"
+
 
 def _ensure_local_writable(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
@@ -396,9 +435,12 @@ def _ensure_local_writable(path: Path) -> None:
         except Exception:
             pass
 
+
 def _summarize_outcome(outcome: Dict[str, Any]) -> Dict[str, Any]:
     plan = outcome.get("plan") if isinstance(outcome.get("plan"), dict) else {}
-    lockfile = outcome.get("lockfile") if isinstance(outcome.get("lockfile"), dict) else {}
+    lockfile = (
+        outcome.get("lockfile") if isinstance(outcome.get("lockfile"), dict) else {}
+    )
     prov_urls: List[str] = []
     try:
         ents = lockfile.get("entities") or []
@@ -411,9 +453,12 @@ def _summarize_outcome(outcome: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "has_plan": bool(plan),
         "plan_keys": sorted(list(plan.keys())) if isinstance(plan, dict) else [],
-        "plan_artifacts_len": len(plan.get("artifacts", []) or []) if isinstance(plan, dict) else 0,
+        "plan_artifacts_len": (
+            len(plan.get("artifacts", []) or []) if isinstance(plan, dict) else 0
+        ),
         "lockfile_provenance_urls": prov_urls,
     }
+
 
 def _log_outcome_preview_and_dump(outcome: Dict[str, Any], tgt_path: Path) -> None:
     if _env_on("MATRIX_SDK_VERBOSE_PLAN"):
@@ -425,6 +470,7 @@ def _log_outcome_preview_and_dump(outcome: Dict[str, Any], tgt_path: Path) -> No
             info(f"Wrote full Hub outcome → {dump}")
         except Exception as e:
             warn(f"Could not write _hub_outcome.json ({e})")
+
 
 def _post_build_runner_hint(tgt_path: Path) -> None:
     """
@@ -456,6 +502,7 @@ def _post_build_runner_hint(tgt_path: Path) -> None:
     except Exception:
         # non-fatal
         pass
+
 
 def _build_via_safe_plan(
     client,
@@ -496,7 +543,9 @@ def _build_via_safe_plan(
     # Load runner + prepare env
     try:
         load = getattr(installer, "_load_runner_from_report", None)
-        runner = load(report, tgt_path) if callable(load) else _load_runner_direct(tgt_path)
+        runner = (
+            load(report, tgt_path) if callable(load) else _load_runner_direct(tgt_path)
+        )
     except Exception:
         runner = _load_runner_direct(tgt_path)
 
@@ -513,6 +562,7 @@ def _build_via_safe_plan(
     _post_build_runner_hint(tgt_path)
     return tgt_path
 
+
 def _load_runner_direct(target_path: Path) -> Dict[str, Any]:
     p = target_path / "runner.json"
     if p.is_file():
@@ -522,11 +572,16 @@ def _load_runner_direct(target_path: Path) -> Dict[str, Any]:
             pass
     return {}
 
+
 # ------------------------- Inline manifest helpers -------------------------
+
 
 def _looks_like_url(s: str) -> bool:  # pragma: no cover
     s = (s or "").strip().lower()
-    return s.startswith("http://") or s.startswith("https://") or s.startswith("file://")
+    return (
+        s.startswith("http://") or s.startswith("https://") or s.startswith("file://")
+    )
+
 
 def _load_manifest_from(source: str) -> tuple[Dict[str, Any], Optional[str]]:
     """Load a manifest from URL-like or filesystem path. Returns (manifest, source_url_for_provenance)."""
@@ -542,6 +597,7 @@ def _load_manifest_from(source: str) -> tuple[Dict[str, Any], Optional[str]]:
         return json.loads(p.read_text(encoding="utf-8")), str(p.as_uri())
     p = Path(src).expanduser().resolve()
     return json.loads(p.read_text(encoding="utf-8")), None
+
 
 def _normalize_manifest_for_sse(manifest: Dict[str, Any]) -> Dict[str, Any]:
     """Normalize SSE url and strip 'transport' if present (non-destructive)."""
@@ -559,6 +615,7 @@ def _normalize_manifest_for_sse(manifest: Dict[str, Any]) -> Dict[str, Any]:
     except Exception:
         pass
     return manifest
+
 
 def _build_via_inline_manifest(
     client,
@@ -587,7 +644,11 @@ def _build_via_inline_manifest(
 
     body_provenance = {"source_url": provenance_url} if provenance_url else None
     info(f"Sending inline manifest for {fqid} with label '{label}'")
-    outcome = _to_dict(install_manifest_fn(fqid, manifest=manifest, target=label, provenance=body_provenance))
+    outcome = _to_dict(
+        install_manifest_fn(
+            fqid, manifest=manifest, target=label, provenance=body_provenance
+        )
+    )
     _log_outcome_preview_and_dump(outcome, tgt_path)
 
     info("Materializing inline manifest…")
@@ -605,7 +666,9 @@ def _build_via_inline_manifest(
 
     try:
         load = getattr(installer, "_load_runner_from_report", None)
-        runner = load(report, tgt_path) if callable(load) else _load_runner_direct(tgt_path)
+        runner = (
+            load(report, tgt_path) if callable(load) else _load_runner_direct(tgt_path)
+        )
     except Exception:
         runner = _load_runner_direct(tgt_path)
 
@@ -621,7 +684,9 @@ def _build_via_inline_manifest(
     _post_build_runner_hint(tgt_path)
     return tgt_path
 
+
 # ------------------------- Runner & repo helpers -------------------------
+
 
 def _valid_runner_schema(obj: Dict[str, Any]) -> bool:
     t = (obj.get("type") or "").strip().lower()
@@ -631,12 +696,14 @@ def _valid_runner_schema(obj: Dict[str, Any]) -> bool:
         return bool((obj.get("entry") or "").strip())
     return False
 
+
 def _plan_runner_url(report_or_outcome: Dict[str, Any]) -> str:
     try:
         plan = report_or_outcome.get("plan", report_or_outcome) or {}
         return (plan.get("runner_url") or "").strip()
     except Exception:
         return ""
+
 
 def _maybe_fetch_runner_and_repo(
     tgt_path: Path,
@@ -690,7 +757,7 @@ def _maybe_fetch_runner_and_repo(
             return ""
         try:
             lockfile = rep.get("lockfile") or {}
-            for e in (lockfile.get("entities") or []):
+            for e in lockfile.get("entities") or []:
                 u = ((e or {}).get("provenance") or {}).get("source_url")
                 if isinstance(u, str) and u.strip():
                     return u.strip()
@@ -718,7 +785,9 @@ def _maybe_fetch_runner_and_repo(
             if _valid_runner_schema(obj):
                 _write_runner(obj)
             else:
-                warn("--runner-url: fetched runner.json failed schema validation (ignored)")
+                warn(
+                    "--runner-url: fetched runner.json failed schema validation (ignored)"
+                )
         except Exception as e:
             warn(f"--runner-url: failed to fetch runner.json ({e})")
 
@@ -731,7 +800,9 @@ def _maybe_fetch_runner_and_repo(
                 if _valid_runner_schema(obj):
                     _write_runner(obj)
                 else:
-                    warn("plan.runner_url: fetched runner.json failed schema validation (ignored)")
+                    warn(
+                        "plan.runner_url: fetched runner.json failed schema validation (ignored)"
+                    )
             except Exception as e:
                 warn(f"plan.runner_url: failed to fetch runner.json ({e})")
 
@@ -751,7 +822,11 @@ def _maybe_fetch_runner_and_repo(
             cur = _current_runner()
             cur_type = (cur.get("type") or "").strip().lower()
             mf_type = (mf_runner.get("type") or "").strip().lower()
-            if (not rpath.exists()) or (prefer_manifest_runner and cur_type == "connector" and mf_type in {"python", "node"}):
+            if (not rpath.exists()) or (
+                prefer_manifest_runner
+                and cur_type == "connector"
+                and mf_type in {"python", "node"}
+            ):
                 info("Using runner from manifest (writing/replacing runner.json).")
                 _write_runner(mf_runner)
 
@@ -762,7 +837,9 @@ def _maybe_fetch_runner_and_repo(
     if not clone_from and manifest:
         mf_repo_spec = _manifest_repo_spec(manifest)
         if isinstance(mf_repo_spec, dict):
-            clone_from = (mf_repo_spec.get("url") or mf_repo_spec.get("repo") or "").strip()
+            clone_from = (
+                mf_repo_spec.get("url") or mf_repo_spec.get("repo") or ""
+            ).strip()
 
     # Determine if we need code based on the (possibly replaced) runner.json
     try:
@@ -772,7 +849,9 @@ def _maybe_fetch_runner_and_repo(
 
     rtype = (runner_obj.get("type") or "").strip().lower()
     entry = (runner_obj.get("entry") or "").strip()
-    need_clone = bool(rtype in {"python", "node"} and (not entry or not (tgt_path / entry).exists()))
+    need_clone = bool(
+        rtype in {"python", "node"} and (not entry or not (tgt_path / entry).exists())
+    )
 
     if clone_from and (need_clone and (auto_clone or bool(repo_url))):
         try:
@@ -781,7 +860,12 @@ def _maybe_fetch_runner_and_repo(
                 clone_cmd = ["git", "clone", "--depth=1"]
                 ref = ""
                 if isinstance(mf_repo_spec, dict):
-                    ref = (mf_repo_spec.get("ref") or mf_repo_spec.get("branch") or mf_repo_spec.get("tag") or "").strip()
+                    ref = (
+                        mf_repo_spec.get("ref")
+                        or mf_repo_spec.get("branch")
+                        or mf_repo_spec.get("tag")
+                        or ""
+                    ).strip()
                 if ref and ref.upper() != "HEAD":
                     clone_cmd += ["--branch", ref]
                 clone_cmd += [clone_from, tmpd]
@@ -790,7 +874,12 @@ def _maybe_fetch_runner_and_repo(
                 # Respect subdir if present
                 src_dir = Path(tmpd)
                 if isinstance(mf_repo_spec, dict):
-                    sub = (mf_repo_spec.get("subdir") or mf_repo_spec.get("subdirectory") or mf_repo_spec.get("path") or "").strip()
+                    sub = (
+                        mf_repo_spec.get("subdir")
+                        or mf_repo_spec.get("subdirectory")
+                        or mf_repo_spec.get("path")
+                        or ""
+                    ).strip()
                     if sub:
                         src_dir = src_dir / sub
 
@@ -815,17 +904,27 @@ def _maybe_fetch_runner_and_repo(
         except Exception:
             pass
 
+
 # ----------------------------------- CLI -----------------------------------
+
 
 @app.command()
 def main(
     id: str = typer.Argument(
         ...,
-        help=("ID or name. Examples: mcp_server:name@1.2.3 | mcp_server:name | name@1.2.3 | name"),
+        help=(
+            "ID or name. Examples: mcp_server:name@1.2.3 | mcp_server:name | name@1.2.3 | name"
+        ),
     ),
-    alias: str | None = typer.Option(None, "--alias", "-a", help="Friendly name for the component"),
-    target: str | None = typer.Option(None, "--target", "-t", help="Specific directory to install into"),
-    hub: str | None = typer.Option(None, "--hub", help="Override Hub base URL for this command"),
+    alias: str | None = typer.Option(
+        None, "--alias", "-a", help="Friendly name for the component"
+    ),
+    target: str | None = typer.Option(
+        None, "--target", "-t", help="Specific directory to install into"
+    ),
+    hub: str | None = typer.Option(
+        None, "--hub", help="Override Hub base URL for this command"
+    ),
     manifest: str | None = typer.Option(
         None,
         "--manifest",
@@ -845,11 +944,15 @@ def main(
         "--repo-url",
         help="Optional repository to clone into the target when the plan has no artifacts or files are missing.",
     ),
-    force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing alias without prompting"),
+    force: bool = typer.Option(
+        False, "--force", "-f", help="Overwrite existing alias without prompting"
+    ),
     no_prompt: bool = typer.Option(
         False,
         "--no-prompt",
-        help=("Do not prompt on alias collisions; exit with code 3 if the alias exists"),
+        help=(
+            "Do not prompt on alias collisions; exit with code 3 if the alias exists"
+        ),
     ),
 ) -> None:
     """
@@ -883,7 +986,9 @@ def main(
         prefer_ns = ns_input or "mcp_server"
         info(f"Resolving '{id}' (prefer_ns={prefer_ns})…")
         try:
-            res = resolve_fqid(client, cfg, id, prefer_ns=prefer_ns, allow_prerelease=False)
+            res = resolve_fqid(
+                client, cfg, id, prefer_ns=prefer_ns, allow_prerelease=False
+            )
         except TypeError:
             res = resolve_fqid(client, cfg, id)
         fqid = res.fqid
@@ -937,8 +1042,12 @@ def main(
             except Exception as e:
                 if _is_dns_or_conn_failure(e):
                     try:
-                        warn("(offline?) couldn't reach public hub; trying local dev hub at http://localhost:443")
-                        fb_client = MatrixClient(base_url="http://localhost:443", token=cfg.token)
+                        warn(
+                            "(offline?) couldn't reach public hub; trying local dev hub at http://localhost:443"
+                        )
+                        fb_client = MatrixClient(
+                            base_url="http://localhost:443", token=cfg.token
+                        )
                         fb_installer = LocalInstaller(fb_client)
                         _build_via_inline_manifest(
                             fb_client,
@@ -969,8 +1078,12 @@ def main(
             except Exception as e:
                 if _is_dns_or_conn_failure(e):
                     try:
-                        warn("(offline?) couldn't reach public hub; trying local dev hub at http://localhost:443")
-                        fb_client = MatrixClient(base_url="http://localhost:443", token=cfg.token)
+                        warn(
+                            "(offline?) couldn't reach public hub; trying local dev hub at http://localhost:443"
+                        )
+                        fb_client = MatrixClient(
+                            base_url="http://localhost:443", token=cfg.token
+                        )
                         fb_installer = LocalInstaller(fb_client)
                         _build_via_safe_plan(
                             fb_client,
@@ -988,7 +1101,9 @@ def main(
     except Exception as e:
         # Helpful hint for the common 422 source_url failure
         s = (str(e) or "").lower()
-        if ("source_url" in s and "missing" in s) or ("unable to load manifest" in s and "source_url" in s):
+        if ("source_url" in s and "missing" in s) or (
+            "unable to load manifest" in s and "source_url" in s
+        ):
             warn(
                 "Hub could not fetch a manifest for this id (no source_url). "
                 "Provide one with --manifest <path-or-url> to install inline."

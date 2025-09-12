@@ -251,8 +251,8 @@ def build_httpx_client_forced(timeout: float = 5.0):
 
     return httpx.Client(
         timeout=timeout,
-        verify=_build_verify(),   # SSLContext | True
-        trust_env=False,          # avoid env surprises
+        verify=_build_verify(),  # SSLContext | True
+        trust_env=False,  # avoid env surprises
         follow_redirects=True,
     )
 

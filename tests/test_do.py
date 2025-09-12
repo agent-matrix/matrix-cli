@@ -15,6 +15,7 @@ try:
 except Exception:
     m = None
 
+
 def import_search_module():
     """
     Imports or reloads the 'matrix_cli.commands.search' module.
@@ -23,6 +24,7 @@ def import_search_module():
     if m:
         return importlib.reload(m)
     pytest.fail("Could not import the search module.")
+
 
 @pytest.fixture(autouse=True)
 def _mock_dependencies(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
@@ -35,13 +37,14 @@ def _mock_dependencies(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
 
     config_mock = MagicMock()
     config_mock.load_config.return_value = SimpleNamespace(
-        home=str(tmp_path), client=SimpleNamespace(token="fake-token", host="mock.mcp.host")
+        home=str(tmp_path),
+        client=SimpleNamespace(token="fake-token", host="mock.mcp.host"),
     )
     config_mock.client_from_config = MagicMock()
     monkeypatch.setitem(sys.modules, "matrix_cli.config", config_mock)
 
     mcp_client_mock = MagicMock()
-    
+
     # Configure the ClientSession mock for successful API calls
     mock_session = MagicMock()
     mock_session.search_catalog.return_value = MagicMock(
@@ -62,16 +65,19 @@ def _mock_dependencies(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     mcp_client_mock.client.sse.sse_client = MagicMock()
     mcp_client_mock.client.websocket.websocket_client = MagicMock()
     mcp_client_mock.client.http.http_client = MagicMock()
-    
+
     monkeypatch.setitem(sys.modules, "mcp", mcp_client_mock)
     monkeypatch.setitem(sys.modules, "mcp.client", mcp_client_mock.client)
     monkeypatch.setitem(sys.modules, "mcp.client.sse", mcp_client_mock.client.sse)
-    monkeypatch.setitem(sys.modules, "mcp.client.websocket", mcp_client_mock.client.websocket)
+    monkeypatch.setitem(
+        sys.modules, "mcp.client.websocket", mcp_client_mock.client.websocket
+    )
     monkeypatch.setitem(sys.modules, "mcp.client.http", mcp_client_mock.client.http)
 
-# ---
 
-## Passing Tests
+# ---
+# Passing Tests
+# ---
 
 def test_cli_handles_errors_gracefully(monkeypatch: pytest.MonkeyPatch):
     """
@@ -83,13 +89,13 @@ def test_cli_handles_errors_gracefully(monkeypatch: pytest.MonkeyPatch):
     app = mod.app
 
     mcp_client_mock = sys.modules["mcp"]
-    mcp_client_mock.ClientSession.return_value.__aenter__.return_value.search_catalog.side_effect = Exception("Mocked network error")
-    
+    mcp_client_mock.ClientSession.return_value.__aenter__.return_value.search_catalog.side_effect = Exception(
+        "Mocked network error"
+    )
+
     # The key is to add catch_exceptions=False here so pytest.raises can catch the error.
     runner.invoke(app, ["main", "some-query"], catch_exceptions=False)
 
-
-# ---
 
 def test_cli_handles_no_token_gracefully(monkeypatch: pytest.MonkeyPatch):
     """
@@ -103,10 +109,10 @@ def test_cli_handles_no_token_gracefully(monkeypatch: pytest.MonkeyPatch):
     config_mock.load_config.return_value = SimpleNamespace(
         home="/mock/path", client=SimpleNamespace(token=None, host="mock.mcp.host")
     )
-    
-    res = runner.invoke(app, ["main", "some-query"])
-    
-    
+
+    runner.invoke(app, ["main", "some-query"])
+
+
 def test_cli_handles_no_host_gracefully(monkeypatch: pytest.MonkeyPatch):
     """
     Tests that the CLI correctly handles a missing client host in the config.
@@ -119,5 +125,5 @@ def test_cli_handles_no_host_gracefully(monkeypatch: pytest.MonkeyPatch):
     config_mock.load_config.return_value = SimpleNamespace(
         home="/mock/path", client=SimpleNamespace(token="fake-token", host=None)
     )
-    
-    res = runner.invoke(app, ["main", "some-query"])
+
+    runner.invoke(app, ["main", "some-query"])

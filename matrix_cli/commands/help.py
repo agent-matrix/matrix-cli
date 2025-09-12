@@ -18,7 +18,14 @@ app = typer.Typer(
 # ------------------------------- tiny helpers ------------------------------- #
 
 _PREFERRED_DEFAULT_TOOL_NAMES = ("default", "main", "run", "chat")
-_PREFERRED_DEFAULT_INPUT_KEYS = ("x-default-input", "query", "prompt", "text", "input", "message")
+_PREFERRED_DEFAULT_INPUT_KEYS = (
+    "x-default-input",
+    "query",
+    "prompt",
+    "text",
+    "input",
+    "message",
+)
 
 
 def _safe_get(obj: Any, *names: str, default: Any = None) -> Any:
@@ -35,7 +42,9 @@ def _safe_get(obj: Any, *names: str, default: Any = None) -> Any:
     return default
 
 
-def _schema_props_required(schema: Dict[str, Any] | None) -> Tuple[Dict[str, Any], Iterable[str]]:
+def _schema_props_required(
+    schema: Dict[str, Any] | None,
+) -> Tuple[Dict[str, Any], Iterable[str]]:
     """Return (properties, required) from a JSON schema-like dict."""
     schema = schema or {}
     props = _safe_get(schema, "properties", default={}) or {}
@@ -74,7 +83,11 @@ def _infer_default_input_key(schema: Dict[str, Any] | None) -> Optional[str]:
             return rk
 
     if isinstance(props, dict):
-        string_keys = [k for k, v in props.items() if isinstance(v, dict) and v.get("type") in (None, "string")]
+        string_keys = [
+            k
+            for k, v in props.items()
+            if isinstance(v, dict) and v.get("type") in (None, "string")
+        ]
         if len(string_keys) == 1:
             return string_keys[0]
 
@@ -129,6 +142,7 @@ def _fmt_default(prop: Dict[str, Any] | None) -> str:
 
 
 # --------------------------------- command --------------------------------- #
+
 
 @app.command()
 def main(
@@ -209,6 +223,7 @@ def main(
     # Choose transport lazily
     try:
         from mcp import ClientSession
+
         if _is_http_like(final_url):
             from mcp.client.sse import sse_client as _transport_ctx  # type: ignore
         elif _is_ws_like(final_url):
@@ -225,7 +240,10 @@ def main(
     async def _list(url_: str) -> Tuple[bool, str, Dict[str, Any], Iterable[Any]]:
         """Return (ok, message, server_meta, tools_list). One connect, one list."""
         try:
-            async with _transport_ctx(url_, timeout=timeout) as (read_stream, write_stream):
+            async with _transport_ctx(url_, timeout=timeout) as (
+                read_stream,
+                write_stream,
+            ):
                 async with ClientSession(read_stream, write_stream) as session:
                     init_result = await session.initialize()
                     tools_resp = await session.list_tools()
@@ -267,7 +285,9 @@ def main(
                 typer.echo(f"• {name}")
 
         # Suggest a concrete follow-up
-        hint_name = _safe_get(_select_default_tool(tools) or {}, "name", default=None) or (names[0] if names else "<tool>")
+        hint_name = _safe_get(
+            _select_default_tool(tools) or {}, "name", default=None
+        ) or (names[0] if names else "<tool>")
         alias_hint = effective_alias or "<alias>"
         typer.echo("\nTry:")
         typer.echo(f"matrix help {alias_hint} --tool {hint_name}")
@@ -275,11 +295,19 @@ def main(
 
     # With --tool ⇒ detailed usage
     # Locate the tool (case-insensitive)
-    lookup = {(_safe_get(t, "name", default="") or "").strip().casefold(): t for t in tools}
+    lookup = {
+        (_safe_get(t, "name", default="") or "").strip().casefold(): t for t in tools
+    }
     t_obj = lookup.get(tool.strip().casefold()) if tool else None
     if not t_obj:
         # suggestions
-        choices = sorted([(_safe_get(t, "name", default="") or "").strip() for t in tools if _safe_get(t, "name", default="")])
+        choices = sorted(
+            [
+                (_safe_get(t, "name", default="") or "").strip()
+                for t in tools
+                if _safe_get(t, "name", default="")
+            ]
+        )
         sug = difflib.get_close_matches(tool or "", choices, n=3, cutoff=0.5)
         error(f"Tool '{tool}' not found.")
         if choices:

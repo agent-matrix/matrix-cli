@@ -17,7 +17,14 @@ app = typer.Typer(
 # -------------------------- tiny local primitives -------------------------- #
 
 _PREFERRED_DEFAULT_TOOL_NAMES = ("default", "main", "run", "chat")
-_PREFERRED_DEFAULT_INPUT_KEYS = ("x-default-input", "query", "prompt", "text", "input", "message")
+_PREFERRED_DEFAULT_INPUT_KEYS = (
+    "x-default-input",
+    "query",
+    "prompt",
+    "text",
+    "input",
+    "message",
+)
 
 
 def _safe_get(obj: Any, *names: str, default: Any = None) -> Any:
@@ -34,7 +41,9 @@ def _safe_get(obj: Any, *names: str, default: Any = None) -> Any:
     return default
 
 
-def _schema_props_required(schema: Dict[str, Any] | None) -> Tuple[Dict[str, Any], Iterable[str]]:
+def _schema_props_required(
+    schema: Dict[str, Any] | None,
+) -> Tuple[Dict[str, Any], Iterable[str]]:
     """Return (properties, required) from a JSON schema-like dict."""
     schema = schema or {}
     props = _safe_get(schema, "properties", default={}) or {}
@@ -102,7 +111,11 @@ def _infer_default_input_key(schema: Dict[str, Any] | None) -> Optional[str]:
 
     # 4) single string property overall
     if isinstance(props, dict):
-        string_keys = [k for k, v in props.items() if isinstance(v, dict) and v.get("type") in (None, "string")]
+        string_keys = [
+            k
+            for k, v in props.items()
+            if isinstance(v, dict) and v.get("type") in (None, "string")
+        ]
         if len(string_keys) == 1:
             return string_keys[0]
 
@@ -139,15 +152,25 @@ def _build_payload_for_text(
         if default_key:
             return {default_key: file_in}, None
         # could be multi-input; suggest wizard
-        return {}, "Multiple inputs or no clear default input detected. Try:\n  matrix mcp call <tool> --alias <alias> --wizard"
+        return (
+            {},
+            "Multiple inputs or no clear default input detected. Try:\n  matrix mcp call <tool> --alias <alias> --wizard",
+        )
 
     # Single-string input with provided text
     if text_arg is not None and default_key:
         return {default_key: text_arg}, None
 
     # If exactly one required key and it's not string → we cannot auto-construct safely
-    if isinstance(required, (list, tuple)) and len(required) == 1 and required[0] not in (default_key or ()):
-        return {}, "This tool requires structured input. Try:\n  matrix mcp call <tool> --alias <alias> --wizard"
+    if (
+        isinstance(required, (list, tuple))
+        and len(required) == 1
+        and required[0] not in (default_key or ())
+    ):
+        return (
+            {},
+            "This tool requires structured input. Try:\n  matrix mcp call <tool> --alias <alias> --wizard",
+        )
 
     # If we have a default key but no text, ask once via prompt (no TTY → fail fast)
     if default_key and text_arg is None:
@@ -160,7 +183,10 @@ def _build_payload_for_text(
             return {}, "No input provided."
 
     # Multiple inputs or ambiguous schema → suggest wizard
-    return {}, "Multiple inputs or no clear default input detected. Try:\n  matrix mcp call <tool> --alias <alias> --wizard"
+    return (
+        {},
+        "Multiple inputs or no clear default input detected. Try:\n  matrix mcp call <tool> --alias <alias> --wizard",
+    )
 
 
 def _print_content_blocks(blocks: Iterable[Dict[str, Any]]) -> None:
@@ -182,6 +208,7 @@ def _print_content_blocks(blocks: Iterable[Dict[str, Any]]) -> None:
 
 
 # --------------------------------- command --------------------------------- #
+
 
 @app.command()
 def main(
@@ -284,6 +311,7 @@ def main(
     # Lazy import MCP transport only now
     try:
         from mcp import ClientSession
+
         if _is_http_like(final_url):
             from mcp.client.sse import sse_client as _transport_ctx  # type: ignore
         elif _is_ws_like(final_url):
@@ -304,7 +332,10 @@ def main(
         result_json_like includes: url, tool, args, content[] or reason on error.
         """
         try:
-            async with _transport_ctx(url_, timeout=timeout) as (read_stream, write_stream):
+            async with _transport_ctx(url_, timeout=timeout) as (
+                read_stream,
+                write_stream,
+            ):
                 async with ClientSession(read_stream, write_stream) as session:
                     init_result = await session.initialize()
                     tools_resp = await session.list_tools()
@@ -320,7 +351,16 @@ def main(
                     if not tool_name:
                         return False, "Tool has no name.", {"url": url_}
 
-                    schema = _safe_get(tool_obj, "input_schema", "inputSchema", "schema", default={}) or {}
+                    schema = (
+                        _safe_get(
+                            tool_obj,
+                            "input_schema",
+                            "inputSchema",
+                            "schema",
+                            default={},
+                        )
+                        or {}
+                    )
                     payload, guidance = _build_payload_for_text(
                         text_arg=text, schema=schema, file_in=file_in
                     )
@@ -328,7 +368,9 @@ def main(
                         return False, guidance, {"url": url_, "tool": tool_name}
 
                     # Call once
-                    resp = await session.call_tool(name=str(tool_name), arguments=payload)
+                    resp = await session.call_tool(
+                        name=str(tool_name), arguments=payload
+                    )
                     content = _safe_get(resp, "content", default=[]) or []
 
                     # Normalize content blocks to JSON-safe form
@@ -339,7 +381,10 @@ def main(
                             blk = _jsonify_content_block(c)
                         except Exception:
                             # Last-resort shape
-                            blk = {"type": getattr(c, "type", "content"), "repr": repr(c)}
+                            blk = {
+                                "type": getattr(c, "type", "content"),
+                                "repr": repr(c),
+                            }
                         blocks.append(blk)
 
                     result = {
@@ -353,9 +398,13 @@ def main(
                     return True, "ok", result
         except KeyboardInterrupt:
             raise
-        except BaseException as e:  # include CancelledError, transport failures
+        except BaseException:  # include CancelledError, transport failures
             # The fix is on this line:
-            return False, "An error occurred", {"url": url_, "reason": "An error occurred"}
+            return (
+                False,
+                "An error occurred",
+                {"url": url_, "reason": "An error occurred"},
+            )
 
     try:
         ok, msg, result = asyncio.run(_oneshot(final_url))

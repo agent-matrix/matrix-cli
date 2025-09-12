@@ -17,7 +17,14 @@ app = typer.Typer(
 # ------------------------------- tiny helpers ------------------------------- #
 
 _PREFERRED_DEFAULT_TOOL_NAMES = ("default", "main", "run", "chat")
-_PREFERRED_DEFAULT_INPUT_KEYS = ("x-default-input", "query", "prompt", "text", "input", "message")
+_PREFERRED_DEFAULT_INPUT_KEYS = (
+    "x-default-input",
+    "query",
+    "prompt",
+    "text",
+    "input",
+    "message",
+)
 
 
 def _safe_get(obj: Any, *names: str, default: Any = None) -> Any:
@@ -34,7 +41,9 @@ def _safe_get(obj: Any, *names: str, default: Any = None) -> Any:
     return default
 
 
-def _schema_props_required(schema: Dict[str, Any] | None) -> Tuple[Dict[str, Any], Iterable[str]]:
+def _schema_props_required(
+    schema: Dict[str, Any] | None,
+) -> Tuple[Dict[str, Any], Iterable[str]]:
     schema = schema or {}
     props = _safe_get(schema, "properties", default={}) or {}
     required = _safe_get(schema, "required", default=[]) or []
@@ -89,7 +98,11 @@ def _infer_default_input_key(schema: Dict[str, Any] | None) -> Optional[str]:
             return rk
 
     if isinstance(props, dict):
-        string_keys = [k for k, v in props.items() if isinstance(v, dict) and v.get("type") in (None, "string")]
+        string_keys = [
+            k
+            for k, v in props.items()
+            if isinstance(v, dict) and v.get("type") in (None, "string")
+        ]
         if len(string_keys) == 1:
             return string_keys[0]
 
@@ -101,7 +114,7 @@ def _kv_merge(dst: Dict[str, Any], kv: Dict[str, str]) -> Dict[str, Any]:
     for k, v in kv.items():
         vl = v.strip().lower()
         if vl in {"true", "false"}:
-            dst[k] = (vl == "true")
+            dst[k] = vl == "true"
             continue
         try:
             if "." in vl:
@@ -143,7 +156,9 @@ class AIRouter:
 
     __slots__ = ("backend", "model", "system")
 
-    def __init__(self, backend: str = "none", model: str = "", system: str = "") -> None:
+    def __init__(
+        self, backend: str = "none", model: str = "", system: str = ""
+    ) -> None:
         self.backend = backend  # e.g., "ollama", "openai", "watsonx", "gemini"
         self.model = model
         self.system = system
@@ -165,6 +180,7 @@ class AIRouter:
 
 
 # --------------------------------- command --------------------------------- #
+
 
 @app.command()
 def main(
@@ -192,22 +208,22 @@ def main(
     ),
 ) -> None:
     """
-    (beta) Interactive loop that keeps a single MCP session open.
+        (beta) Interactive loop that keeps a single MCP session open.
 
-    • Picks a default tool (default|main|run|chat, else first).
-    • Maps plain text lines to the tool's primary string input (schema-aware).
-    • Slash commands:
-/quit             exit
-/help             show commands
-/tool <name>      switch current tool
-/kv k=v ...       set persistent key=value args (bool/int/float coercion)
-/clear            clear persistent key=value args
-/json {...}       send a raw JSON object (no schema help)
-/retry            re-send the last payload
-/ai backend[:model]  (future) set AI backend; no network calls today
-/system TEXT      (future) set AI system prompt (stored only)
+        • Picks a default tool (default|main|run|chat, else first).
+        • Maps plain text lines to the tool's primary string input (schema-aware).
+        • Slash commands:
+    /quit             exit
+    /help             show commands
+    /tool <name>      switch current tool
+    /kv k=v ...       set persistent key=value args (bool/int/float coercion)
+    /clear            clear persistent key=value args
+    /json {...}       send a raw JSON object (no schema help)
+    /retry            re-send the last payload
+    /ai backend[:model]  (future) set AI backend; no network calls today
+    /system TEXT      (future) set AI system prompt (stored only)
 
-    Performance: one connect; no background threads; minimal allocations.
+        Performance: one connect; no background threads; minimal allocations.
     """
     # Lazy imports for fast startup
     try:
@@ -220,7 +236,6 @@ def main(
             _final_url_from_inputs,
             DEFAULT_ENDPOINT,
             _jsonify_content_block,
-            _to_jsonable,
         )
         from .mcp import _is_http_like, _is_ws_like  # type: ignore
     except Exception as e:  # pragma: no cover
@@ -254,6 +269,7 @@ def main(
     # Choose transport lazily
     try:
         from mcp import ClientSession
+
         if _is_http_like(final_url):
             from mcp.client.sse import sse_client as _transport_ctx  # type: ignore
         elif _is_ws_like(final_url):
@@ -278,7 +294,7 @@ def main(
         session_cm = ClientSession(read_stream, write_stream).__aenter__()
         session = await session_cm  # type: ignore
 
-        init_result = await session.initialize()
+        await session.initialize()  # Call for its side-effect, but discard the result.
         tools_resp = await session.list_tools()
         tools = _safe_get(tools_resp, "tools", default=[]) or []
 
@@ -287,7 +303,11 @@ def main(
 
         info(f"Connected: {url_}")
         if tools:
-            tool_names = ", ".join((_safe_get(t, "name", default="") or "") for t in tools if _safe_get(t, "name", default=""))
+            tool_names = ", ".join(
+                (_safe_get(t, "name", default="") or "")
+                for t in tools
+                if _safe_get(t, "name", default="")
+            )
             info(f"Tools: {tool_names}")
         return session, read_stream, write_stream, tools
 
@@ -302,7 +322,9 @@ def main(
         except Exception:
             pass
 
-    async def _call(session: ClientSession, tool_name: str, payload: Dict[str, Any]) -> Tuple[bool, str, Dict[str, Any]]:
+    async def _call(
+        session: ClientSession, tool_name: str, payload: Dict[str, Any]
+    ) -> Tuple[bool, str, Dict[str, Any]]:
         """Call and normalize response."""
         try:
             resp = await session.call_tool(name=tool_name, arguments=payload)
@@ -344,10 +366,14 @@ def main(
         raise typer.Exit(2)
 
     current_tool_name = (_safe_get(tool_obj, "name", default="") or "").strip()
-    current_tool_schema = _safe_get(tool_obj, "input_schema", "inputSchema", "schema", default={}) or {}
+    current_tool_schema = (
+        _safe_get(tool_obj, "input_schema", "inputSchema", "schema", default={}) or {}
+    )
     default_key = _infer_default_input_key(current_tool_schema)
 
-    typer.echo(f"💬 chatting with {effective_alias or final_url} — tool: {current_tool_name}")
+    typer.echo(
+        f"💬 chatting with {effective_alias or final_url} — tool: {current_tool_name}"
+    )
     typer.echo("Type /help for commands. Press Ctrl+C or /quit to exit.")
 
     # ------------------------------- REPL loop ---------------------------- #
@@ -392,17 +418,31 @@ def main(
                         typer.echo("Usage: /tool <name>")
                         continue
                     want = parts[1].strip().casefold()
-                    lookup = {(_safe_get(t, "name", default="") or "").strip().casefold(): t for t in tools}
+                    lookup = {
+                        (_safe_get(t, "name", default="") or "").strip().casefold(): t
+                        for t in tools
+                    }
                     sel = lookup.get(want)
                     if not sel:
                         # list available
-                        names = [(_safe_get(t, "name", default="") or "").strip() for t in tools if _safe_get(t, "name", default="")]
+                        names = [
+                            (_safe_get(t, "name", default="") or "").strip()
+                            for t in tools
+                            if _safe_get(t, "name", default="")
+                        ]
                         typer.echo("Available tools:")
                         for n in names:
                             typer.echo(f"  - {n}")
                         continue
-                    current_tool_name = (_safe_get(sel, "name", default="") or "").strip()
-                    current_tool_schema = _safe_get(sel, "input_schema", "inputSchema", "schema", default={}) or {}
+                    current_tool_name = (
+                        _safe_get(sel, "name", default="") or ""
+                    ).strip()
+                    current_tool_schema = (
+                        _safe_get(
+                            sel, "input_schema", "inputSchema", "schema", default={}
+                        )
+                        or {}
+                    )
                     default_key = _infer_default_input_key(current_tool_schema)
                     kv_args.clear()
                     typer.echo(f"✓ tool set: {current_tool_name}")
@@ -428,7 +468,7 @@ def main(
                     continue
 
                 if cmd == "/json":
-                    raw = line[len("/json") :].strip()
+                    raw = line[len("/json"):].strip()
                     if not raw:
                         typer.echo("Usage: /json { ... }")
                         continue
@@ -440,7 +480,9 @@ def main(
                     except Exception as e:
                         typer.echo(f"Invalid JSON: {e}")
                         continue
-                    ok, msg, rep = asyncio.run(_call(session, current_tool_name, payload))  # type: ignore[arg-type]
+                    ok, msg, rep = asyncio.run(
+                        _call(session, current_tool_name, payload)
+                    )  # type: ignore[arg-type]
                     if not ok:
                         error(msg)
                         continue
@@ -452,7 +494,9 @@ def main(
                     if not last_payload:
                         typer.echo("Nothing to retry yet.")
                         continue
-                    ok, msg, rep = asyncio.run(_call(session, current_tool_name, last_payload))  # type: ignore[arg-type]
+                    ok, msg, rep = asyncio.run(
+                        _call(session, current_tool_name, last_payload)
+                    )  # type: ignore[arg-type]
                     if not ok:
                         error(msg)
                         continue
@@ -462,7 +506,9 @@ def main(
                 if cmd == "/ai":
                     # future: ai router; keep local state only
                     if len(parts) < 2:
-                        typer.echo(f"ai backend: {ai.backend} model: {ai.model or '(default)'}")
+                        typer.echo(
+                            f"ai backend: {ai.backend} model: {ai.model or '(default)'}"
+                        )
                     else:
                         seg = parts[1].strip()
                         if ":" in seg:
@@ -470,11 +516,13 @@ def main(
                             ai.set_backend(be, mo)
                         else:
                             ai.set_backend(seg)
-                        typer.echo(f"✓ ai backend set: {ai.backend} model: {ai.model or '(default)'}")
+                        typer.echo(
+                            f"✓ ai backend set: {ai.backend} model: {ai.model or '(default)'}"
+                        )
                     continue
 
                 if cmd == "/system":
-                    sysmsg = line[len("/system") :].strip()
+                    sysmsg = line[len("/system"):].strip()
                     ai.set_system(sysmsg)
                     typer.echo("✓ system prompt set (local only)")
                     continue
@@ -491,11 +539,15 @@ def main(
             payload: Dict[str, Any] = {}
 
             # Allow raw JSON lines for power users
-            if (line.startswith("{") and line.endswith("}")) or (line.startswith("[") and line.endswith("]")):
+            if (line.startswith("{") and line.endswith("}")) or (
+                line.startswith("[") and line.endswith("]")
+            ):
                 try:
                     payload = json.loads(line)
                     if not isinstance(payload, dict):
-                        typer.echo("JSON payload must be an object; arrays are not supported here.")
+                        typer.echo(
+                            "JSON payload must be an object; arrays are not supported here."
+                        )
                         continue
                 except Exception as e:
                     typer.echo(f"Invalid JSON: {e}")
