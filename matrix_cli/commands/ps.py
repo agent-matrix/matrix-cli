@@ -111,7 +111,13 @@ def main(
 
     from matrix_sdk import runtime
 
-    rows = runtime.status()
+    # Cross-platform friendly: don't crash if runtime.status() fails (e.g., Windows pid probe)
+    try:
+        rows = runtime.status() or []
+    except Exception as e:
+        typer.echo(f"ps: could not read runtime status ({e})", err=True)
+        rows = []
+
     now = time.time()
 
     # Build normalized row dicts once
