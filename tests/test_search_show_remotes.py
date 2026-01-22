@@ -15,7 +15,10 @@ def test_search_and_show(runner):
     assert '"id": "mcp_server:test@1.0.0"' in r1.stdout
 
 
-def test_remotes_roundtrip(runner):
+def test_remotes_roundtrip(runner, monkeypatch):
+    # Admin commands require an operator token
+    monkeypatch.setenv("MATRIX_HUB_TOKEN", "test-token")
+
     r_list = runner.invoke(app, ["remotes", "list"])
     assert r_list.exit_code == 0
 
