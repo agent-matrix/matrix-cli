@@ -1,0 +1,18 @@
+schema_version: "0.1"
+repo:
+  owner: "agent-matrix"
+  name: "matrix-cli"
+  full_name: "agent-matrix/matrix-cli"
+  role: "cli"
+alive: { participates: true, contracts_version: "0.2" }
+maintenance:
+  maintainer: "matrix-maintainer"
+  repair_enabled: true
+  repair_constraints: [pr_only, run_tests]
+governance:
+  risk_level: low
+  requires_approval: false
+  approver: "matrix-guardian"
+economics: { budget_aware: false, reporter: "matrix-treasury" }
+events: { emitted: [], consumed: [] }
+health: { type: "command", endpoint: "", command: "matrix --version" }
