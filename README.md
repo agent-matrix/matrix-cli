@@ -95,22 +95,43 @@ matrix uninstall watsonx-chat -y
 
 ## 📦 Install
 
+`matrix-cli` is cross-platform (Linux, macOS, **Windows**). The **recommended**
+install on every OS is **pipx**, which puts the CLI in its own isolated
+environment and avoids clobbering console scripts in a shared/global Python
+(the #1 cause of Windows install failures — see Troubleshooting).
+
 ```bash
-# Recommended
+# Recommended — isolated, works the same on Linux/macOS/Windows
 pipx install matrix-cli
 
-# Or with pip (active virtualenv)
-pip install matrix-cli
+# Add MCP probing (SSE + WebSocket) when you need `matrix mcp probe/call`
+pipx install "matrix-cli[mcp]"
 ```
+
+Prefer pip? **Always use a virtual environment** — never install into the
+global/system Python:
+
+```bash
+# Linux/macOS
+python3 -m venv .venv && source .venv/bin/activate
+pip install -U pip && pip install matrix-cli
+```
+
+```powershell
+# Windows (PowerShell)
+py -m venv .venv; .venv\Scripts\Activate.ps1
+python -m pip install -U pip; pip install matrix-cli
+```
+
+> The base install is intentionally lightweight (typer, rich, httpx, requests,
+> matrix-python-sdk). MCP probing deps (`mcp`, `websockets`) ship in the
+> `[mcp]` extra and are loaded on demand.
 
 ### Optional extras
 
 ```bash
 # Add MCP client (SSE works; WebSocket needs `websockets`)
-pip install "matrix-cli[mcp]"   # installs mcp>=1.13.1
-
-# If you also want WebSocket probing:
-pip install websockets
+pip install "matrix-cli[mcp]"   # installs mcp>=1.13.1 + websockets
 
 # Dev extras (linting, tests, docs)
 pip install "matrix-cli[dev]"
@@ -428,7 +449,17 @@ matrix mcp probe --url "http://127.0.0.1:${port}/messages/" --json
 
 ## 🐞 Troubleshooting
 
-* **“Missing 'mcp' package”** — Install the optional extra: `pip install "matrix-cli[mcp]"` (and `pip install websockets` for WS).
+* **Windows install fails with `WinError 2 … '…\\Scripts\\dotenv.exe' -> '…dotenv.exe.deleteme'`** (or the same for `python-multipart`, `uvicorn`, etc.) — This is **pip being unable to replace a console script in a global/system Python** (e.g. `C:\Python311`). It is not a bug in `matrix-cli`; it happens when a dependency such as `python-dotenv` must be upgraded and its `.exe` is locked or not writable. Fixes, in order of preference:
+  1. **Use pipx** (isolated env — recommended): `pipx install matrix-cli`. If you already started down the pip path, `pip uninstall -y matrix-cli` first.
+  2. **Use a virtualenv** instead of the global Python:
+     ```powershell
+     py -m venv .venv; .venv\Scripts\Activate.ps1
+     python -m pip install -U pip; pip install matrix-cli
+     ```
+  3. **Pre-upgrade the stuck package, then retry** (clears the locked `.exe` first): `python -m pip install -U python-dotenv` then `pip install matrix-cli`.
+  4. **Force a clean reinstall**: `pip install --no-cache-dir --force-reinstall matrix-cli`.
+  5. If you must use the global Python, close any process using `dotenv`/the Scripts dir (terminals, editors, antivirus scans) and run the shell **as Administrator**, or use `pip install --user matrix-cli`.
+* **“Missing 'mcp' package”** — MCP probing is an optional extra now: `pip install "matrix-cli[mcp]"` (installs `mcp` + `websockets`). The base install stays lightweight.
 * **TLS / certificate errors** — Set `SSL_CERT_FILE` or `REQUESTS_CA_BUNDLE` to your CA bundle.
 * **Alias not found when probing** — Use the alias shown by `matrix ps` (case-insensitive), or pass `--url` directly.
 * **Connector mode shows PID=0** — Expected in attach mode; ensure the remote server is running.
