@@ -32,8 +32,17 @@ dependencies = [
   "matrix-python-sdk>=0.1.11",
   "httpx>=0.28,<0.29",
   "requests>=2.32",
-  "mcp>=1.13.1",
-  "websockets>=12.0"
+  # Declared explicitly (also required by matrix-python-sdk) so a base
+  # `pip install matrix-cli` always resolves python-dotenv in this range.
+  "python-dotenv>=1.1,<2.0",
+  # NOTE: `mcp` and `websockets` are intentionally NOT core dependencies.
+  # They are only needed for `matrix mcp probe/call`, are imported lazily, and
+  # print a clear "pip install 'matrix-cli[mcp]'" hint when missing. Keeping
+  # them out of core makes the base install lightweight and cross-platform:
+  # the full `mcp` stack pulls uvicorn/pydantic-settings/python-multipart/
+  # starlette/cryptography, whose console scripts fail to upgrade on a global
+  # Windows Python (the classic `WinError 2 ... .exe.deleteme`). Install them
+  # on demand via the `[mcp]` extra below.
 ]
 
 [project.urls]
